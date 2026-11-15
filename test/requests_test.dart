@@ -872,6 +872,33 @@ void main() {
     });
   });
 
+  group('push registration', () {
+    test('setPushRegistration puts the phone\'s FID', () async {
+      final c = _client((_) => http.Response('', 204));
+      await c.api.setPushRegistration('f1');
+      final s = c.sent.single;
+      expect((s.method, s.path), ('PUT', '/api/users/@me/push-registration'));
+      expect(s.json, {'fid': 'f1'});
+    });
+
+    test('deletePushRegistration deletes the session\'s, with no body',
+        () async {
+      final c = _client((_) => http.Response('', 204));
+      await c.api.deletePushRegistration();
+      final s = c.sent.single;
+      expect(
+          (s.method, s.path), ('DELETE', '/api/users/@me/push-registration'));
+      expect((s.request.body, s.contentType), ('', null));
+    });
+
+    test('a bot\'s 403 is a DuvetAuthException', () async {
+      final c = _client((_) =>
+          http.Response('{"error":"bots cannot access this endpoint"}', 403));
+      expect(
+          c.api.setPushRegistration('f1'), throwsA(isA<DuvetAuthException>()));
+    });
+  });
+
   group('notification levels', () {
     // A level, as the API's fixture has it.
     final setting = jsonDecode(

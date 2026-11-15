@@ -1,3 +1,15 @@
+## Unreleased
+
+### Added
+
+- **Push registration**, for the API version that brings Android push
+  notifications: `setPushRegistration(fid)` makes the phone's Firebase
+  Installation ID the session's registration (`PUT
+  /api/users/@me/push-registration`), and `deletePushRegistration()` deletes
+  it. A session has one; a new one replaces it, and a FID another account
+  registered moves to this one. Signing out and a new password delete it. An
+  older API answers both with a 404.
+
 ## 2.8.0 – 2026-11-13
 
 ### Breaking changes

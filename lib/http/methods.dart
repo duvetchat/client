@@ -1337,6 +1337,23 @@ mixin RestMethods {
         'clear notification level');
   }
 
+  /// Makes [fid], the phone's Firebase Installation ID, the session's push
+  /// registration: the user's messages that notify reach the phone as FCM data
+  /// messages while they have no computer with Duvet open. A session has one:
+  /// a new one replaces it, and a FID another account registered moves to this
+  /// one. Signing out or a new password deletes it. A bot gets a 403.
+  Future<void> setPushRegistration(String fid) async {
+    await request(
+        'PUT', '/api/users/@me/push-registration', 'set push registration',
+        json: {'fid': fid});
+  }
+
+  /// Deletes the session's push registration, if it has one.
+  Future<void> deletePushRegistration() async {
+    await request('DELETE', '/api/users/@me/push-registration',
+        'delete push registration');
+  }
+
   /// Sets the user's avatar or banner ([kind]) to the image as given: the API
   /// stores it whole, so crop it first. [onProgress] gets the bytes of the
   /// request sent so far, and their total.

@@ -1,0 +1,31 @@
+# Publishes duvet_client to pub.dev when a version tag is pushed, through
+# pub.dev's automated publishing (GitHub's OIDC token, no stored secret).
+#
+# To release: bump `version` in pubspec.yaml and CHANGELOG.md on main, then
+#   git tag vX.Y.Z && git push origin vX.Y.Z
+# pub.dev refuses a tag that doesn't match pubspec.yaml's version.
+#
+# Needs, once, on pub.dev (package admin, "Automated publishing"): publishing
+# from GitHub Actions enabled for duvetchat/client, tag pattern v{{version}}.
+name: Publish to pub.dev
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+      - run: dart pub get
+      - run: dart analyze
+      - run: dart test
+
+  publish:
+    needs: test
+    permissions:
+      id-token: write
+    uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1

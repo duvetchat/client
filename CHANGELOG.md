@@ -1,3 +1,28 @@
+## Unreleased
+
+### Added
+
+- **The emojis and stickers of all your spaces**, for the API version that
+  lets them be used anywhere: `listMyEmojis()` and `listMyStickers()` list
+  those of every space the user is in, by space then name (`GET
+  /api/users/@me/emojis` and `/stickers`). People only; an older API answers
+  both with a 404.
+- **Any custom emoji's image**: `emojiImageUrl(id)` is the API's
+  `/emojis/<id>`, which anyone may load with no session and which sends it on
+  to the emoji's image: how to draw a `<:id:>` whose emoji the user's spaces
+  don't have. One that's gone is a 404.
+- `ReactionRemoveEvent.emojiId`: the custom emoji of a reaction taken back,
+  which tells it apart from another of the same name.
+
+### Changed
+
+- **Reactions go by their emoji**: two custom emojis of one name, from two
+  spaces, are two reactions. `removeRoomReaction` and
+  `removeConversationReaction` take a custom emoji's ID, or a Unicode emoji. A
+  name still works, as older apps send one: the user leaves every reaction on
+  the message that someone added under that name, so it can take back several,
+  of emojis of one name from different spaces.
+
 ## 2.9.0 – 2026-11-15
 
 ### Added

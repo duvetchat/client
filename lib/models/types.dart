@@ -2581,16 +2581,23 @@ class ReactionEvent {
         emojiId = j['emoji_id'] as String?;
 }
 
+/// One reaction taken back. A custom emoji's comes with its ID, which tells it
+/// apart from another of the same name, of another space.
 class ReactionRemoveEvent {
   final String messageId;
   final String userId;
   final String emojiName;
+  final String? emojiId;
   const ReactionRemoveEvent(
-      {required this.messageId, required this.userId, required this.emojiName});
+      {required this.messageId,
+      required this.userId,
+      required this.emojiName,
+      this.emojiId});
   ReactionRemoveEvent.fromJson(Map<String, dynamic> j)
       : messageId = j['message_id'] as String,
         userId = j['user_id'] as String,
-        emojiName = j['emoji_name'] as String;
+        emojiName = j['emoji_name'] as String,
+        emojiId = j['emoji_id'] as String?;
 }
 
 class TypingEvent {

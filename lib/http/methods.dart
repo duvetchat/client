@@ -561,6 +561,13 @@ mixin RestMethods {
         .then((_) {}, onError: (_) {});
   }
 
+  /// The image of the custom emoji [emojiId], of any space, which anyone may
+  /// load with no session (`/emojis/<id>`, which sends it on to its
+  /// attachment): how to draw a `<:id:>` of a message whose emoji the user's
+  /// spaces don't have. One that's gone is a 404.
+  Uri emojiImageUrl(String emojiId) =>
+      router.urlFromPath('/emojis/${Uri.encodeComponent(emojiId)}', root: true);
+
   /// A new link to the attachment [attachmentId], signed for another 24 hours,
   /// as the API gives it: a path on its host, as a message's attachments have
   /// it (`/attachments/<id>?sig=…&exp=…`, `exp` in Unix seconds). Whoever can
@@ -614,12 +621,18 @@ mixin RestMethods {
         json: {'emoji_name': emojiName, 'emoji_id': emojiId});
   }
 
+  /// Takes back the user's reaction with [emoji]: a custom emoji's ID, which
+  /// takes back that one alone (two of one name, from two spaces, are two
+  /// reactions), or a Unicode emoji. A name also works, as apps from before
+  /// reactions went by ID take one back: the user leaves every reaction on the
+  /// message that someone added under that name, whatever name the user's own
+  /// was added under.
   Future<void> removeRoomReaction(
-      String roomId, String messageId, String emojiName) async {
+      String roomId, String messageId, String emoji) async {
     await request(
         'DELETE',
         '/api/rooms/$roomId/messages/$messageId/reactions/'
-            '${Uri.encodeComponent(emojiName)}',
+            '${Uri.encodeComponent(emoji)}',
         'remove reaction');
   }
 
@@ -633,12 +646,14 @@ mixin RestMethods {
         json: {'emoji_name': emojiName, 'emoji_id': emojiId});
   }
 
+  /// A conversation's [removeRoomReaction]: [emoji] is a custom emoji's ID or a
+  /// Unicode emoji.
   Future<void> removeConversationReaction(
-      String convId, String messageId, String emojiName) async {
+      String convId, String messageId, String emoji) async {
     await request(
         'DELETE',
         '/api/users/@me/conversations/$convId/messages/$messageId/reactions/'
-            '${Uri.encodeComponent(emojiName)}',
+            '${Uri.encodeComponent(emoji)}',
         'remove conversation reaction');
   }
 
@@ -726,6 +741,14 @@ mixin RestMethods {
     return _decodeList(response, SpaceEmoji.fromJson);
   }
 
+  /// The emojis of every space the user is in, by space then name: what they
+  /// can write with in any room, direct message or group. People only.
+  Future<List<SpaceEmoji>> listMyEmojis() async {
+    final response =
+        await request('GET', '/api/users/@me/emojis', 'list my emojis');
+    return _decodeList(response, SpaceEmoji.fromJson);
+  }
+
   /// [onProgress] gets the bytes of the request sent so far, and their total.
   Future<SpaceEmoji> createEmoji(String spaceId, String name, File file,
       {void Function(int sent, int total)? onProgress}) async {
@@ -757,6 +780,14 @@ mixin RestMethods {
   Future<List<SpaceSticker>> listStickers(String spaceId) async {
     final response =
         await request('GET', '/api/spaces/$spaceId/stickers', 'list stickers');
+    return _decodeList(response, SpaceSticker.fromJson);
+  }
+
+  /// The stickers of every space the user is in, by space then name: a message
+  /// anywhere may send any of them. People only.
+  Future<List<SpaceSticker>> listMyStickers() async {
+    final response =
+        await request('GET', '/api/users/@me/stickers', 'list my stickers');
     return _decodeList(response, SpaceSticker.fromJson);
   }
 

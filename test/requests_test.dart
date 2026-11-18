@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:duvet_client/duvet.dart';
+import 'package:duvet_client/http/router.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
@@ -559,6 +560,18 @@ void main() {
           c.sent[2].request.url.toString(), endsWith('/reactions/a%2Fb%23c'));
     });
 
+    test('a custom emoji\'s reaction is taken back by its ID', () async {
+      final c = _client((_) => null);
+      await c.api.removeRoomReaction(
+          'r1', 'm1', '01920000-0000-7000-8000-0000000e4011');
+      await c.api.removeConversationReaction(
+          'c1', 'm1', '01920000-0000-7000-8000-0000000e4011');
+      expect(c.sent.map((s) => '${s.method} ${s.path}'), [
+        'DELETE /api/rooms/r1/messages/m1/reactions/01920000-0000-7000-8000-0000000e4011',
+        'DELETE /api/users/@me/conversations/c1/messages/m1/reactions/01920000-0000-7000-8000-0000000e4011',
+      ]);
+    });
+
     test('conversation reactions', () async {
       final c = _client((_) => null);
       await c.api.addConversationReaction('c1', 'm1', 'cat', emojiId: 'e1');
@@ -693,6 +706,27 @@ void main() {
         'PATCH /api/spaces/s1/stickers/st1',
         'DELETE /api/spaces/s1/stickers/st1',
       ]);
+    });
+
+    test('listMyEmojis and listMyStickers ask for the user\'s lists', () async {
+      final c = _client((_) => [_asset]);
+      expect((await c.api.listMyEmojis()).single.name, 'cat');
+      expect((await c.api.listMyStickers()).single.spaceId, 's1');
+      expect(c.sent.map((s) => '${s.method} ${s.path}'), [
+        'GET /api/users/@me/emojis',
+        'GET /api/users/@me/stickers',
+      ]);
+    });
+
+    test('emojiImageUrl is the API\'s /emojis/<id>, outside /api', () {
+      final c = _client((_) => null);
+      expect(c.api.emojiImageUrl('e1').toString(),
+          'https://api.duvet.chat/emojis/e1');
+      final local = RestClient(http.Client(),
+          router: const ApiRouter(api: 'localhost:9876', secure: false));
+      expect(local.emojiImageUrl('e1').toString(),
+          'http://localhost:9876/emojis/e1');
+      expect(c.api.emojiImageUrl('../users').path, '/emojis/..%2Fusers');
     });
   });
 

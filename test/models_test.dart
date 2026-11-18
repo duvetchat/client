@@ -1296,6 +1296,23 @@ void main() {
         4005
       ));
     });
+
+    // Two custom emojis of one name, from two spaces, are two reactions: the
+    // one taken back is named by its ID.
+    test('a reaction taken back names its custom emoji by its ID', () {
+      for (final name in [
+        'reaction_remove_event',
+        'dm_reaction_remove_event'
+      ]) {
+        final full = _load(name, 'full');
+        expect(full['emoji_id'], isA<String>(), reason: name);
+        expect(ReactionRemoveEvent.fromJson(full).emojiId, full['emoji_id'],
+            reason: name);
+        expect(ReactionRemoveEvent.fromJson(_load(name, 'partial')).emojiId,
+            isNull,
+            reason: name);
+      }
+    });
   });
 
   group('voice and calls', () {

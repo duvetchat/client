@@ -137,6 +137,33 @@ mixin GatewayEvents {
   Stream<DMMentionCreatedEvent> get onDMMentionCreate =>
       onEvent.whereType<DMMentionCreatedEvent>();
 
+  /// DM_MESSAGE_UPDATE of an encrypted message: its edit's entry. An API
+  /// before end-to-end encryption sends the message, on [onDMUpdate].
+  Stream<DMMessageEditedEvent> get onDMEdit =>
+      onEvent.whereType<DMMessageEditedEvent>();
+
+  // End-to-end encryption's, which a gateway sends only to a client that has
+  // it (`RestClient.duvetClient`), and a device's only to the connections
+  // that identified with it (`identifyDevice`).
+  Stream<MlsCommitPayloadEvent> get onMlsCommit =>
+      onEvent.whereType<MlsCommitPayloadEvent>();
+  Stream<MlsWelcomePayloadEvent> get onMlsWelcome =>
+      onEvent.whereType<MlsWelcomePayloadEvent>();
+  Stream<MlsProposalPayloadEvent> get onMlsProposal =>
+      onEvent.whereType<MlsProposalPayloadEvent>();
+  Stream<DeviceMessagePayloadEvent> get onDeviceMessage =>
+      onEvent.whereType<DeviceMessagePayloadEvent>();
+  Stream<KeyPackagesLowPayloadEvent> get onKeyPackagesLow =>
+      onEvent.whereType<KeyPackagesLowPayloadEvent>();
+  Stream<DeviceAddedEvent> get onDeviceAdd =>
+      onEvent.whereType<DeviceAddedEvent>();
+  Stream<DeviceRemovedEvent> get onDeviceRemove =>
+      onEvent.whereType<DeviceRemovedEvent>();
+  Stream<IdentityUpdatedEvent> get onIdentityUpdate =>
+      onEvent.whereType<IdentityUpdatedEvent>();
+  Stream<HistoryShareCreatedEvent> get onHistoryShareCreate =>
+      onEvent.whereType<HistoryShareCreatedEvent>();
+
   Stream<ConversationCreatedEvent> get onConversationCreate =>
       onEvent.whereType<ConversationCreatedEvent>();
   Stream<ConversationUpdatedEvent> get onConversationUpdate =>

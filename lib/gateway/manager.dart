@@ -69,6 +69,11 @@ class GatewayManager with GatewayEvents {
   /// counts the connections as [ClientPlatform.desktop].
   final ClientPlatform? platform;
 
+  /// The device of the user the shards' connections are for, which each
+  /// identify names ([GatewayClient.identifyDevice]). A device named later
+  /// takes effect on a new session ([wantFreshSession]), not a resumed one.
+  final String? Function()? identifyDevice;
+
   final List<GatewayClient> _shards = List.empty(growable: true);
   final List<StreamSubscription<dynamic>> _shardSubs =
       List.empty(growable: true);
@@ -84,6 +89,7 @@ class GatewayManager with GatewayEvents {
     this.connectTimeout = defaultConnectTimeout,
     this.resume = false,
     this.platform,
+    this.identifyDevice,
   })  : _log = log ?? defaultLog,
         router = router ?? const ApiRouter();
 
@@ -96,6 +102,7 @@ class GatewayManager with GatewayEvents {
     this.connectTimeout = defaultConnectTimeout,
     this.resume = false,
     this.platform,
+    this.identifyDevice,
   })  : api = RestClient(http.Client()),
         _log = log ?? defaultLog,
         router = router ?? const ApiRouter();
@@ -188,7 +195,8 @@ class GatewayManager with GatewayEvents {
         router: router,
         connectTimeout: connectTimeout,
         resume: resume,
-        platform: platform);
+        platform: platform,
+        identifyDevice: identifyDevice);
 
     _shardSubs.addAll([
       client.events.listen(

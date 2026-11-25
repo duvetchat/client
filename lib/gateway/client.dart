@@ -165,6 +165,16 @@ class GatewayClient {
   /// [ClientPlatform.desktop], as it does every bot's.
   final ClientPlatform? platform;
 
+  /// The device of the user this connection is for, which each identify
+  /// names as `device_id`, read as each one goes out: the gateway hands a
+  /// device's events (DEVICE_MESSAGE, KEY_PACKAGES_LOW) only to the
+  /// connections that named it. The identify also names the app as
+  /// `RestClient.duvetClient` does (`client`), and the gateway hands
+  /// end-to-end encryption's events only to a client that has it. Without
+  /// one, or while it answers null, the identify names no device. A resumed
+  /// session keeps the device its first identify named.
+  final String? Function()? identifyDevice;
+
   /// Broadcast stream of every decoded [GatewayEventPayload] received from
   /// the gateway, including the initial [ReadyEvent].
   ///
@@ -323,6 +333,7 @@ class GatewayClient {
     this.connectTimeout = defaultConnectTimeout,
     this.resume = false,
     this.platform,
+    this.identifyDevice,
   })  : _log = log ?? ((msg) => print('[gateway:shard-$shardId] $msg')),
         router = router ?? const ApiRouter();
 
@@ -682,6 +693,8 @@ class GatewayClient {
       // Only to shard: see the class's doc.
       if (shardCount > 1) ...{'shard_id': shardId, 'num_shards': shardCount},
       if (platform case final platform?) 'platform': platform.value,
+      if (api.duvetClient case final client?) 'client': client,
+      if (identifyDevice?.call() case final device?) 'device_id': device,
     };
     final sent = _send({'type': 'identify', 'data': data});
     _log('identify sent (shard=$shardId/$shardCount, seq=$_lastSeq'

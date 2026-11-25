@@ -3,6 +3,7 @@ import 'dart:convert' show jsonDecode;
 import 'package:duvet_client/utils/util.dart';
 part 'gateway_envelope.dart';
 part 'rest_types.dart';
+part 'e2e_types.dart';
 
 // ---------------------------------------------------------------------------
 // Primitive enums
@@ -100,6 +101,11 @@ final class MessageType extends EnumLike<int, MessageType> {
   /// caller, it has no content, and [DirectMessage.call] says who was in the
   /// call and when.
   static const call = MessageType(3);
+
+  /// A conversation's notice that its author shared its history with another
+  /// member: no content, and [DirectMessage.historyShare] says with whom and
+  /// how far back.
+  static const historyShare = MessageType(4);
   const MessageType(super.value);
 
   static MessageType fromInt(int v) => MessageType(v);
@@ -313,6 +319,25 @@ class Embed {
 
 /// A file: one sent with a message, or one of a user's or a space's files
 /// (their attachment lists).
+/// What an attachment holds ([Attachment.kind]).
+final class AttachmentKind extends EnumLike<int, AttachmentKind> {
+  /// A file as it was uploaded: a room message's, an avatar, an emoji's
+  /// image.
+  static const file = AttachmentKind(0);
+
+  /// An end-to-end encrypted message's file, sealed by its sender's device
+  /// (named `file`, `application/octet-stream`, without dimensions): its
+  /// message's envelope describes it, and `E2eApi.signedFile` downloads it.
+  static const encryptedFile = AttachmentKind(1);
+
+  /// A segment of a user's encrypted backup.
+  static const backupSegment = AttachmentKind(2);
+
+  /// A part of a shared history package.
+  static const historyPart = AttachmentKind(3);
+  const AttachmentKind(super.value);
+}
+
 class Attachment {
   final String id;
   final String? messageId;
@@ -327,6 +352,10 @@ class Attachment {
   final bool? pending;
   final String? url;
 
+  /// What it holds: [AttachmentKind.file] from an API before end-to-end
+  /// encryption.
+  final AttachmentKind kind;
+
   const Attachment({
     required this.id,
     this.messageId,
@@ -340,6 +369,7 @@ class Attachment {
     this.deleted,
     this.pending,
     this.url,
+    this.kind = AttachmentKind.file,
   });
 
   Attachment.fromJson(Map<String, dynamic> j)
@@ -356,7 +386,8 @@ class Attachment {
             : null,
         deleted = j['deleted'] as bool?,
         pending = j['pending'] as bool?,
-        url = j['url'] as String?;
+        url = j['url'] as String?,
+        kind = AttachmentKind(j['kind'] as int? ?? 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1314,7 +1345,18 @@ class Conversation {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
+
+  /// By the ID of their membership: the order the core's create_group takes
+  /// them in.
   final List<ConversationMember> members;
+
+  /// Made before end-to-end encryption came: any member may make its group.
+  /// False from an API before it.
+  final bool legacy;
+
+  /// Its MLS group, null without one, and from an event: a new conversation
+  /// has none yet.
+  final ConversationGroup? mls;
 
   const Conversation({
     required this.id,
@@ -1325,6 +1367,8 @@ class Conversation {
     required this.updatedAt,
     this.deletedAt,
     required this.members,
+    this.legacy = false,
+    this.mls,
   });
 
   Conversation.fromJson(Map<String, dynamic> j)
@@ -1337,7 +1381,11 @@ class Conversation {
         deletedAt = _parseDate(j['deleted_at']),
         members = (j['members'] as List<dynamic>? ?? [])
             .map((e) => ConversationMember.fromJson(e as Map<String, dynamic>))
-            .toList();
+            .toList(),
+        legacy = j['legacy'] as bool? ?? false,
+        mls = j['mls'] != null
+            ? ConversationGroup.fromJson(j['mls'] as Map<String, dynamic>)
+            : null;
 }
 
 /// What a call notice ([MessageType.call]) says about its call: who was in
@@ -1407,6 +1455,34 @@ class DirectMessage {
   /// every other message.
   final CallNotice? call;
 
+  /// What a history share's notice ([MessageType.historyShare]) says; null on
+  /// every other message.
+  final ShareNotice? historyShare;
+
+  // An end-to-end encrypted message's own, null on a notice and from an API
+  // before encryption.
+
+  /// Its MLS message (standard base64), which the core opens. As a queue
+  /// entry, it's the entry's data, [id] its message_id, [authorId] its
+  /// sender_user and [senderDeviceId] its sender_device.
+  final String? ciphertext;
+
+  /// Its number in its conversation's queue, and when the API took it (Unix
+  /// milliseconds): its entry's.
+  final int? seq;
+  final int? sentAt;
+
+  /// The group's generation and epoch it was made in.
+  final int? generation;
+  final int? epoch;
+  final String? senderDeviceId;
+
+  /// When its author last edited it.
+  final DateTime? editedAt;
+
+  /// Whom it mentions, as its sender listed them: empty when nobody.
+  final List<String> mentions;
+
   const DirectMessage({
     required this.id,
     this.conversationId,
@@ -1424,6 +1500,15 @@ class DirectMessage {
     this.stickerAttachmentId,
     this.pinnedAt,
     this.call,
+    this.historyShare,
+    this.ciphertext,
+    this.seq,
+    this.sentAt,
+    this.generation,
+    this.epoch,
+    this.senderDeviceId,
+    this.editedAt,
+    this.mentions = const [],
   });
 
   DirectMessage.fromJson(Map<String, dynamic> j)
@@ -1455,7 +1540,18 @@ class DirectMessage {
         pinnedAt = _parseDate(j['pinned_at']),
         call = j['call'] != null
             ? CallNotice.fromJson(j['call'] as Map<String, dynamic>)
-            : null;
+            : null,
+        historyShare = j['history_share'] != null
+            ? ShareNotice.fromJson(j['history_share'] as Map<String, dynamic>)
+            : null,
+        ciphertext = j['ciphertext'] as String?,
+        seq = j['seq'] as int?,
+        sentAt = j['sent_at'] as int?,
+        generation = j['generation'] as int?,
+        epoch = j['epoch'] as int?,
+        senderDeviceId = j['sender_device_id'] as String?,
+        editedAt = _parseDate(j['edited_at']),
+        mentions = _strings(j['mentions']);
 }
 
 // ---------------------------------------------------------------------------
@@ -2811,10 +2907,20 @@ class ConversationMemberRemoveEvent {
 class DMMessageDeleteEvent {
   final String id;
   final String conversationId;
-  const DMMessageDeleteEvent({required this.id, required this.conversationId});
+
+  /// An encrypted message's tombstone, its entry in the queue, which the core
+  /// applies; a notice's deletion, and an API before end-to-end encryption,
+  /// have none.
+  final MlsEntry? entry;
+
+  const DMMessageDeleteEvent(
+      {required this.id, required this.conversationId, this.entry});
   DMMessageDeleteEvent.fromJson(Map<String, dynamic> j)
       : id = j['id'] as String,
-        conversationId = j['conversation_id'] as String;
+        conversationId = j['conversation_id'] as String,
+        entry = j['entry'] != null
+            ? MlsEntry.fromJson(j['entry'] as Map<String, dynamic>)
+            : null;
 }
 
 /// The user's own profile: the public user plus the fields hidden from

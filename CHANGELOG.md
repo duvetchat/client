@@ -1,3 +1,71 @@
+## Unreleased
+
+What the mobile app's end-to-end encryption needs, for the API version that
+brings it (its `e2e` branch): its routes, objects and events, the client's
+name, raw uploads, downloads from signed URLs and the refusals it tells apart.
+Everything is new or optional: calls, names and behavior from before stay.
+
+### Breaking changes
+
+- Ten events join the sealed `GatewayEventPayload`: `MlsCommitPayloadEvent`,
+  `MlsWelcomePayloadEvent`, `MlsProposalPayloadEvent`,
+  `DeviceMessagePayloadEvent`, `KeyPackagesLowPayloadEvent`,
+  `DeviceAddedEvent`, `DeviceRemovedEvent`, `IdentityUpdatedEvent`,
+  `HistoryShareCreatedEvent` and `DMMessageEditedEvent` (see "Added"). A
+  `switch` over it without a default case has to handle them.
+
+### Added
+
+- **What the app is**: `RestClient(duvetClient: 'android/1.1.0')` sends it as
+  `X-Duvet-Client` with every request, renewals included, and each gateway
+  identify as `client`. The API takes encryption's routes, and a
+  conversation's, only from a client whose version has it. `identifyDevice`
+  on `GatewayManager` and `GatewayClient` names the user's device in each
+  identify (`device_id`), read as each one goes out.
+- **Encryption's routes**, `E2eApi(api)`, named as the desktop app's: the
+  configuration (`config`); devices (`deviceChallenge`, `registerDevice`,
+  `bindDevice`, `devices`, `deleteDevice`); the identity (`putIdentity`,
+  `putDeviceList`, `identity`, `identities`, `identityBackup` with its
+  `replaced` identities and `identity:`); key packages (`putKeyPackages`,
+  `claimKeyPackages`); a conversation's group (`groupInfo`, `commit`,
+  `queue`); members (`addMember`, `removeMember`, `leave`); messages
+  (`sendMessage`, `editMessage`, `deleteMessage`, `deletedMessages`); the
+  inbox between devices (`sendToDevice`, `inbox`, `clearInbox`); shared
+  history (`putShare`, `putSharePart`, `completeShare`, `shares`, `sharePart`,
+  `ackShare`); the backup (`segments`, `putSegment`, `segment`); and
+  decryption failures (`reportDecryptFailure`, `decryptFailures`). Binary
+  fields are standard base64, as the core takes them.
+- **Raw uploads**: `request(bytes:)` sends a body as it is
+  (`application/octet-stream`), a package's parts and the backup's segments
+  among them, with its progress. A form's list value repeats its field.
+- **Downloads from a signed URL**: `E2eApi.signedFile(url)` fetches a part's,
+  a segment's or an encrypted attachment's file with none of the app's
+  headers (no `Authorization`, `X-Session-Token`, `X-Duvet-Client` or
+  cookie), with its progress as it comes (`sendWithin`'s
+  `onReceiveProgress`). Its refusal is a `DuvetApiException`, never a
+  `DuvetAuthException`.
+- **The refusals encryption tells apart**, subtypes of `DuvetApiException`:
+  `DuvetUpdateRequiredException` (426, with `client` and `minimum`),
+  `DuvetPausedException` (the 503 while encrypted conversations are paused,
+  with `retryAfter`), `DuvetStaleMessageException`,
+  `DuvetEpochTakenException`, `DuvetIdentityChangedException`,
+  `DuvetDeviceListChangedException` (409s, with what each carries) and
+  `DuvetCommitRefusedException` (a 422's `code`). Any other error reads as
+  before.
+- **The objects and events**: `Conversation.legacy` and `mls`
+  (`ConversationGroup`); an encrypted `DirectMessage`'s `ciphertext`, `seq`,
+  `sentAt`, `generation`, `epoch`, `senderDeviceId`, `editedAt` and
+  `mentions`; a history share's notice (`MessageType.historyShare`,
+  `DirectMessage.historyShare`); `DMMessageDeleteEvent.entry`, an encrypted
+  message's tombstone; `Attachment.kind`; `SignIn.deviceChallenge`;
+  `resetPassword(removeDevices:)`. MLS_COMMIT, MLS_WELCOME, MLS_PROPOSAL,
+  DEVICE_MESSAGE, KEY_PACKAGES_LOW, DEVICE_ADD, DEVICE_REMOVE,
+  IDENTITY_UPDATE and HISTORY_SHARE_CREATE are read into their types, each on
+  its stream (`onMlsCommit` and the like), and DM_MESSAGE_UPDATE of an
+  encrypted message, its edit's entry, is a `DMMessageEditedEvent`
+  (`onDMEdit`): an API before encryption still sends the message, a
+  `DMMessageUpdatedEvent`.
+
 ## 2.10.0 – 2026-11-18
 
 ### Added

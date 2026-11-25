@@ -114,4 +114,19 @@ func TestWriteFixtures(t *testing.T) {
 	// A notification level, as its list and its PUT answer it, and the event of a change.
 	w("notification_setting", of[q.NotificationSetting])
 	w("notification_settings_update_event", of[ev.NotificationSettingsUpdate])
+
+	// End-to-end encryption's events, from the API's e2e branch (HISTORY_SHARE_CREATE from its shared history's).
+	// MLS_PROPOSAL carries an MLS_COMMIT's data (MlsProposal is MlsCommit), and DEVICE_ADD a device as the list of
+	// them has it but for current.
+	w("mls_commit_event", of[ev.MlsCommit])
+	w("mls_welcome_event", of[ev.MlsWelcome])
+	w("device_message_event", of[ev.DeviceMessage])
+	w("key_packages_low_event", of[ev.KeyPackagesLow])
+	w("device_add_event", of[ev.DeviceAdd])
+	w("device_remove_event", of[ev.DeviceRemove])
+	w("identity_update_event", of[ev.IdentityUpdate])
+	w("history_share_create_event", of[ev.HistoryShareCreate])
+	// DM_MESSAGE_UPDATE as end-to-end encryption sends it: an encrypted message's edit, its entry. dm_message_update
+	// keeps the message the API sent before it, until the fixtures are made again from the e2e branch.
+	w("dm_message_edit_event", of[ev.DMMessageUpdate])
 }

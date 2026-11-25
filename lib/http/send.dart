@@ -20,13 +20,15 @@ const _piece = 64 * 1024;
 /// and with an [http.RequestAbortedException] when [abortTrigger] completes
 /// first; either way the request is aborted where [client] supports it (the
 /// default one does). [onProgress] gets the bytes of the body sent so far, and
-/// their total.
+/// their total; [onReceiveProgress] the bytes of the answer received so far,
+/// and its length, -1 when the answer doesn't say.
 Future<http.Response> sendWithin(
   http.Client client,
   http.BaseRequest request, {
   required Duration timeout,
   Future<void>? abortTrigger,
   void Function(int sent, int total)? onProgress,
+  void Function(int received, int total)? onReceiveProgress,
 }) async {
   // Completes with the reason the request stops early.
   final stop = Completer<Object>();
@@ -66,7 +68,7 @@ Future<http.Response> sendWithin(
   alive();
   try {
     return await Future.any([
-      _exchange(client, sending, alive),
+      _exchange(client, sending, alive, onReceiveProgress),
       stop.future.then<http.Response>((reason) => throw reason),
     ]);
   } on http.RequestAbortedException {
@@ -79,12 +81,16 @@ Future<http.Response> sendWithin(
   }
 }
 
-Future<http.Response> _exchange(
-    http.Client client, http.BaseRequest request, void Function() alive) async {
+Future<http.Response> _exchange(http.Client client, http.BaseRequest request,
+    void Function() alive, void Function(int, int)? onReceive) async {
   final response = await client.send(request);
   alive();
+  final total = response.contentLength ?? -1;
+  var received = 0;
   final bytes = await http.ByteStream(response.stream.map((chunk) {
     alive();
+    received += chunk.length;
+    onReceive?.call(received, total);
     return chunk;
   })).toBytes();
   return http.Response.bytes(bytes, response.statusCode,

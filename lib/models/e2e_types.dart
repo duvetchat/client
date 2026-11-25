@@ -1,8 +1,8 @@
 part of 'types.dart';
 
 // ---------------------------------------------------------------------------
-// End-to-end encryption (PLAN-E2E-API.md, «Rutas» and «Eventos del gateway»),
-// which E2eApi's routes send and answer. Binary fields are standard base64,
+// End-to-end encryption: the objects E2eApi's routes send and answer, and the
+// gateway's encryption events. Binary fields are standard base64,
 // padded, as the API sends them and the core takes them.
 // ---------------------------------------------------------------------------
 

@@ -317,8 +317,6 @@ class Embed {
 // Attachment
 // ---------------------------------------------------------------------------
 
-/// A file: one sent with a message, or one of a user's or a space's files
-/// (their attachment lists).
 /// What an attachment holds ([Attachment.kind]).
 final class AttachmentKind extends EnumLike<int, AttachmentKind> {
   /// A file as it was uploaded: a room message's, an avatar, an emoji's
@@ -338,6 +336,8 @@ final class AttachmentKind extends EnumLike<int, AttachmentKind> {
   const AttachmentKind(super.value);
 }
 
+/// A file: one sent with a message, or one of a user's or a space's files
+/// (their attachment lists).
 class Attachment {
   final String id;
   final String? messageId;

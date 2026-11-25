@@ -1901,9 +1901,9 @@ mixin RestMethods {
   }
 }
 
-/// The refusals end-to-end encryption tells apart (PLAN-E2E-CLIENTES.md,
-/// «Qué se manda y qué se le dice al núcleo»), by their status and the API's
-/// error, with what each carries; any other a [DuvetApiException], as before.
+/// The refusals an end-to-end encryption engine tells apart, by their status
+/// and the API's error, with what each carries; any other a
+/// [DuvetApiException], as before.
 DuvetApiException _refusal(http.Response response, String action) {
   final (status, reason, body) =
       (response.statusCode, response.reasonPhrase, response.body);
@@ -1983,12 +1983,13 @@ DuvetApiException _refusal(http.Response response, String action) {
           body: body,
           deviceList: deviceList,
           version: version),
-    (422, {'code': final String code}) => DuvetCommitRefusedException(
-        action: action,
-        statusCode: status,
-        reasonPhrase: reason,
-        body: body,
-        code: code),
+    (422, {'error': 'commit refused', 'code': final String code}) =>
+      DuvetCommitRefusedException(
+          action: action,
+          statusCode: status,
+          reasonPhrase: reason,
+          body: body,
+          code: code),
     _ => DuvetApiException(
         action: action, statusCode: status, reasonPhrase: reason, body: body),
   };

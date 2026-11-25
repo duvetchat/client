@@ -1552,7 +1552,7 @@ void main() {
     });
   });
 
-  // What the app is (PLAN-E2E-API.md, «Formatos que la API lee en Go»): the
+  // What the app is, as X-Duvet-Client and the identify's client name it: the
   // API takes encryption's routes and a conversation's only from a client
   // that has it.
   group('the client\'s name', () {
@@ -1620,9 +1620,8 @@ void main() {
     });
   });
 
-  // The API's refusals that encryption tells apart (PLAN-E2E-CLIENTES.md,
-  // «Qué se manda y qué se le dice al núcleo»), each a DuvetApiException with
-  // its status and body, as every other is.
+  // The API's refusals that an encryption engine tells apart, each a
+  // DuvetApiException with its status and body, as every other is.
   group('refusals', () {
     Future<Object> refusal(int status, Object body,
         {Map<String, String> headers = const {}}) async {
@@ -1715,6 +1714,7 @@ void main() {
         (409, {'error': 'another segment holds this day', 'current': 'g1'}),
         (409, 'not json'),
         (422, {'error': 'this space has no storage bucket'}),
+        (422, {'error': 'another refusal', 'code': 'removes_last_member'}),
       ]) {
         final e = await refusal(status, body);
         expect(e.runtimeType, DuvetApiException, reason: '$body');
@@ -1722,8 +1722,7 @@ void main() {
     });
   });
 
-  // Every route of PLAN-E2E-API.md's «Rutas», A to K, as the API's e2e branch
-  // takes and answers it.
+  // Every end-to-end encryption route, as the API takes and answers it.
   group('end-to-end encryption', () {
     const conv = '/api/users/@me/conversations/c1';
     ({E2eApi e2e, List<Sent> sent}) e2e(Object? Function(Sent) reply) {
@@ -2579,8 +2578,8 @@ void main() {
   });
 
   // A part's, a segment's or an encrypted attachment's file, at the URL the
-  // API signed for it (PLAN-E2E-API.md, I and J): fetched with none of the
-  // app's headers, which a redirect would carry to the storage.
+  // API signed for it: fetched with none of the app's headers, which a
+  // redirect would carry to the storage.
   group('signed downloads', () {
     test(
         'a part and a segment come from the URL their route answers, '

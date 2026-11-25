@@ -21,8 +21,8 @@ List<T> _list<T>(Object? j, T Function(Map<String, dynamic>) of) => [
 List<String> _ids(Object? j) =>
     [for (final id in j as List<dynamic>? ?? const []) id as String];
 
-/// The routes of end-to-end encryption (PLAN-E2E-API.md, «Rutas», A to K),
-/// for the session [api] sends its requests with, named as the desktop's
+/// The API's end-to-end encryption routes, for the session [api] sends its
+/// requests with, named as the desktop's
 /// `e2eApi(client)` names them so both engines read alike. Binary fields go
 /// as the core makes and takes them, in standard base64; a package's parts
 /// and the backup's segments go up as bytes, and come down from the signed

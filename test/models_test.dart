@@ -19,6 +19,21 @@ Map<String, dynamic> _load(String name, String variant) =>
     jsonDecode(File('test/fixtures/$name.$variant.json').readAsStringSync())
         as Map<String, dynamic>;
 
+/// A message's end-to-end encryption fields, which a notice, or a message of an
+/// API from before encryption, doesn't have: the tests take them out of a
+/// fixture, which a generator run against the API fills whole.
+const _encryptedFields = {
+  'ciphertext',
+  'seq',
+  'sent_at',
+  'generation',
+  'epoch',
+  'sender_device_id',
+  'edited_at',
+  'mentions',
+  'history_share',
+};
+
 /// The fixture's variants. [always] are the keys the server always sets
 /// although its type allows null (e.g. a room message's room_id): the nulls
 /// variant takes them from the full one.
@@ -1631,8 +1646,8 @@ void main() {
     });
   });
 
-  // What the API with end-to-end encryption sends (PLAN-E2E-API.md, «Eventos
-  // del gateway» and «Rutas»): binary fields in standard base64.
+  // What the API with end-to-end encryption sends, its events and its routes'
+  // answers: binary fields in standard base64.
   group('end-to-end encryption', () {
     GatewayEventPayload? dispatch(String type, Map<String, dynamic> data) =>
         GatewayEnvelope.fromJson({
@@ -1805,12 +1820,12 @@ void main() {
         DateTime.utc(2026, 10, 22, 10, 0, 0, 123, 456),
         'Ag=='
       ));
-      // An API from before end-to-end encryption sends the message.
+      // An API from before end-to-end encryption sends the message, with no
+      // entry.
+      final message = _load('dm_message_update', 'full')..remove('entry');
       final before =
-          dispatch('DM_MESSAGE_UPDATE', _load('dm_message_update', 'full'))
-              as DMMessageUpdatedEvent;
-      expect(
-          before.data.content, _load('dm_message_update', 'full')['content']);
+          dispatch('DM_MESSAGE_UPDATE', message) as DMMessageUpdatedEvent;
+      expect(before.data.content, message['content']);
     });
 
     test(
@@ -1840,8 +1855,8 @@ void main() {
         9,
         'm1'
       ));
-      final notice = dispatch(
-              'DM_MESSAGE_DELETE', _load('dm_message_delete_event', 'full'))
+      final notice = dispatch('DM_MESSAGE_DELETE',
+              _load('dm_message_delete_event', 'full')..remove('entry'))
           as DMMessageDeletedEvent;
       expect(notice.data.entry, isNull);
     });
@@ -1885,8 +1900,10 @@ void main() {
       ));
       expect(m.mentions, ['u2', 'u3']);
       // The API leaves them out of a notice, as an API from before them does.
-      final notice = DirectMessage.fromJson(
-          {..._load('dm_message_create', 'full'), 'type': 2});
+      final notice = DirectMessage.fromJson({
+        ..._load('dm_message_create', 'full'),
+        'type': 2,
+      }..removeWhere((key, _) => _encryptedFields.contains(key)));
       expect((
         notice.ciphertext,
         notice.seq,
@@ -1960,7 +1977,9 @@ void main() {
       });
       expect(outside.mls?.joinedSeq, isNull);
       // An API from before end-to-end encryption says neither.
-      final older = Conversation.fromJson(_load('conversation', 'full'));
+      final older = Conversation.fromJson(_load('conversation', 'full')
+        ..remove('legacy')
+        ..remove('mls'));
       expect((older.legacy, older.mls), (false, null));
     });
 
@@ -2009,8 +2028,8 @@ void main() {
             'DM_MESSAGE_UPDATE', _load('dm_message_edit_event', 'full'))!,
       };
       // A message from before end-to-end encryption isn't an edit's entry.
-      final before =
-          dispatch('DM_MESSAGE_UPDATE', _load('dm_message_update', 'full'))!;
+      final before = dispatch('DM_MESSAGE_UPDATE',
+          _load('dm_message_update', 'full')..remove('entry'))!;
       final updates = events.onDMUpdate.toList();
       sent.values.forEach(events.add);
       events.add(before);

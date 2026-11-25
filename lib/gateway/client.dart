@@ -172,7 +172,9 @@ class GatewayClient {
   /// `RestClient.duvetClient` does (`client`), and the gateway hands
   /// end-to-end encryption's events only to a client that has it. Without
   /// one, or while it answers null, the identify names no device. A resumed
-  /// session keeps the device its first identify named.
+  /// session keeps the device its first identify named, so a device named
+  /// later takes effect on a new session: [wantFreshSession], then a new
+  /// socket.
   final String? Function()? identifyDevice;
 
   /// Broadcast stream of every decoded [GatewayEventPayload] received from

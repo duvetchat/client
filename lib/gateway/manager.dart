@@ -70,7 +70,8 @@ class GatewayManager with GatewayEvents {
   final ClientPlatform? platform;
 
   /// The device of the user the shards' connections are for, which each
-  /// identify names ([GatewayClient.identifyDevice]).
+  /// identify names ([GatewayClient.identifyDevice]). A device named later
+  /// takes effect on a new session ([wantFreshSession]), not a resumed one.
   final String? Function()? identifyDevice;
 
   final List<GatewayClient> _shards = List.empty(growable: true);

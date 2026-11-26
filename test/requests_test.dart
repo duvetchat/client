@@ -253,6 +253,22 @@ void main() {
       expect(c.api.sessionToken, 'sess', reason: 'kept when none comes back');
     });
 
+    test('a refresh still limited after its tries says the API\'s wait',
+        () async {
+      var refreshes = 0;
+      final c = _client((s) => s.path == '/api/auth/refresh'
+          ? http.Response('', 429,
+              headers: {'retry-after': ++refreshes > 3 ? '7' : '0'})
+          : http.Response('', 401));
+      await expectLater(
+          c.api.refreshSession(),
+          throwsA(isA<DuvetApiException>()
+              .having((e) => e.statusCode, 'statusCode', 429)
+              .having((e) => e.retryAfter, 'retryAfter',
+                  const Duration(seconds: 7))));
+      expect(refreshes, 4);
+    });
+
     test('without a session token a 401 just throws', () async {
       final c = _client((_) => http.Response('', 401), sessionToken: '');
       await expectLater(c.api.getFriends(), throwsA(isA<DuvetAuthException>()));
@@ -1671,6 +1687,31 @@ void main() {
           503, {'error': 'too many writes are waiting for their conversations'},
           headers: {'retry-after': '1'});
       expect(e.runtimeType, DuvetApiException);
+      expect((e as DuvetApiException).retryAfter, const Duration(seconds: 1));
+    });
+
+    test('a refusal says how long the API asks to wait, when it does',
+        () async {
+      const limited = {'error': 'too many requests'};
+      final e = await refusal(429, limited, headers: {'retry-after': '37'})
+          as DuvetApiException;
+      expect(e.retryAfter, const Duration(seconds: 37));
+      // A refusal the engine tells apart carries it too.
+      final stale = await refusal(
+          409, {'error': 'stale message', 'generation': 1, 'epoch': 9},
+          headers: {'retry-after': '2'}) as DuvetStaleMessageException;
+      expect(stale.retryAfter, const Duration(seconds: 2));
+      // None said, or none that reads as seconds: null.
+      for (final headers in [
+        <String, String>{},
+        {'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT'},
+        {'retry-after': '-1'},
+        {'retry-after': 'soon'},
+      ]) {
+        final unsaid =
+            await refusal(429, limited, headers: headers) as DuvetApiException;
+        expect(unsaid.retryAfter, isNull, reason: '$headers');
+      }
     });
 
     test('the 409s the engine tells apart, with what each carries', () async {
@@ -2655,6 +2696,15 @@ void main() {
               .having((e) => e, 'type', isNot(isA<DuvetAuthException>()))));
       // No renewal: the session has nothing to do with it.
       expect(c.sent, hasLength(1));
+    });
+
+    test('a limited download says the wait it was given', () async {
+      final c = _client((_) =>
+          http.Response('slow down', 429, headers: {'retry-after': '12'}));
+      await expectLater(
+          E2eApi(c.api).signedFile('/attachments/a1?sig=x&exp=9'),
+          throwsA(isA<DuvetApiException>().having(
+              (e) => e.retryAfter, 'retryAfter', const Duration(seconds: 12))));
     });
 
     test('a download that stops arriving fails with TimeoutException',

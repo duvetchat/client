@@ -1907,6 +1907,7 @@ mixin RestMethods {
 DuvetApiException _refusal(http.Response response, String action) {
   final (status, reason, body) =
       (response.statusCode, response.reasonPhrase, response.body);
+  final retryAfter = retryAfterOf(response.headers);
   // A body without what its error carries reads as any other.
   return switch ((status, _jsonObject(body))) {
     (426, final j) => DuvetUpdateRequiredException(
@@ -1914,6 +1915,7 @@ DuvetApiException _refusal(http.Response response, String action) {
         statusCode: status,
         reasonPhrase: reason,
         body: body,
+        retryAfter: retryAfter,
         client: _string(j?['client']),
         minimum: _string(j?['minimum'])),
     (503, {'error': 'encrypted conversations are paused'}) =>
@@ -1922,12 +1924,7 @@ DuvetApiException _refusal(http.Response response, String action) {
           statusCode: status,
           reasonPhrase: reason,
           body: body,
-          retryAfter: Duration(
-              seconds: switch (
-                  int.tryParse(response.headers['retry-after'] ?? '')) {
-            final int seconds when seconds >= 0 => seconds,
-            _ => 60,
-          })),
+          retryAfter: retryAfter ?? const Duration(seconds: 60)),
     (
       409,
       {
@@ -1941,6 +1938,7 @@ DuvetApiException _refusal(http.Response response, String action) {
           statusCode: status,
           reasonPhrase: reason,
           body: body,
+          retryAfter: retryAfter,
           generation: generation,
           epoch: epoch),
     (
@@ -1956,6 +1954,7 @@ DuvetApiException _refusal(http.Response response, String action) {
           statusCode: status,
           reasonPhrase: reason,
           body: body,
+          retryAfter: retryAfter,
           generation: generation,
           epoch: epoch),
     (
@@ -1967,6 +1966,7 @@ DuvetApiException _refusal(http.Response response, String action) {
           statusCode: status,
           reasonPhrase: reason,
           body: body,
+          retryAfter: retryAfter,
           identityKey: identityKey),
     (
       409,
@@ -1981,6 +1981,7 @@ DuvetApiException _refusal(http.Response response, String action) {
           statusCode: status,
           reasonPhrase: reason,
           body: body,
+          retryAfter: retryAfter,
           deviceList: deviceList,
           version: version),
     (422, {'error': 'commit refused', 'code': final String code}) =>
@@ -1989,9 +1990,14 @@ DuvetApiException _refusal(http.Response response, String action) {
           statusCode: status,
           reasonPhrase: reason,
           body: body,
+          retryAfter: retryAfter,
           code: code),
     _ => DuvetApiException(
-        action: action, statusCode: status, reasonPhrase: reason, body: body),
+        action: action,
+        statusCode: status,
+        reasonPhrase: reason,
+        body: body,
+        retryAfter: retryAfter),
   };
 }
 

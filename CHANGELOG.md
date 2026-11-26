@@ -52,6 +52,11 @@ Everything is new or optional: calls, names and behavior from before stay.
   `DuvetDeviceListChangedException` (409s, with what each carries) and
   `DuvetCommitRefusedException` (a 422's `code`). Any other error reads as
   before.
+- **How long a refusal asks to wait** (duvetchat/client#52):
+  `DuvetApiException.retryAfter` is the answer's `Retry-After` in seconds, as
+  the API sends it with its 429s and 503s, or null when it doesn't say. Every
+  refusal carries it, the session refresh's and a signed download's too, and
+  `retryAfterOf(headers)` reads it.
 - **The objects and events**: `Conversation.legacy` and `mls`
   (`ConversationGroup`); an encrypted `DirectMessage`'s `ciphertext`, `seq`,
   `sentAt`, `generation`, `epoch`, `senderDeviceId`, `editedAt` and

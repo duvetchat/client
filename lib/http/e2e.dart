@@ -436,7 +436,8 @@ class E2eApi {
           action: 'download a signed file',
           statusCode: response.statusCode,
           reasonPhrase: response.reasonPhrase,
-          body: response.body);
+          body: response.body,
+          retryAfter: retryAfterOf(response.headers));
     }
     return response.bodyBytes;
   }

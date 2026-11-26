@@ -13,17 +13,32 @@ class DuvetApiException extends DuvetException {
   final String? reasonPhrase;
   final String? body;
 
+  /// How long the answer asked to wait before trying again (its
+  /// `Retry-After`, as the API sends it with its 429s and 503s), null when it
+  /// didn't say: see [retryAfterOf].
+  final Duration? retryAfter;
+
   const DuvetApiException({
     required String action,
     required this.statusCode,
     this.reasonPhrase,
     this.body,
+    this.retryAfter,
   }) : super('Failed to $action: $statusCode $reasonPhrase');
 
   @override
   String toString() =>
       'DuvetApiException[$statusCode]: $message\n${body ?? ''}';
 }
+
+/// An answer's `Retry-After` in [headers] (an `http.Response`'s, whose names
+/// are lowercase), in whole seconds, or null when it's missing or doesn't read
+/// as seconds: a date, which the API never sends, reads as none.
+Duration? retryAfterOf(Map<String, String> headers) =>
+    switch (int.tryParse(headers['retry-after'] ?? '')) {
+      final int seconds when seconds >= 0 => Duration(seconds: seconds),
+      _ => null,
+    };
 
 /// Thrown when authentication credentials are invalid or missing.
 class DuvetAuthException extends DuvetApiException {
@@ -50,6 +65,7 @@ class DuvetUpdateRequiredException extends DuvetApiException {
       required super.statusCode,
       super.reasonPhrase,
       super.body,
+      super.retryAfter,
       this.client,
       this.minimum});
 }
@@ -58,16 +74,17 @@ class DuvetUpdateRequiredException extends DuvetApiException {
 /// write waits [retryAfter] and goes again as it was. Any other 503 is a
 /// [DuvetApiException].
 class DuvetPausedException extends DuvetApiException {
-  /// The answer's `Retry-After`: 60 seconds, the API's own, when it doesn't
-  /// read.
-  final Duration retryAfter;
-
   const DuvetPausedException(
       {required super.action,
       required super.statusCode,
       super.reasonPhrase,
       super.body,
-      required this.retryAfter});
+      required Duration super.retryAfter});
+
+  /// The answer's `Retry-After`: 60 seconds, the API's own, when it doesn't
+  /// read.
+  @override
+  Duration get retryAfter => super.retryAfter!;
 }
 
 /// The API's 409 `stale message`: a message, an edit or a deletion made in
@@ -83,6 +100,7 @@ class DuvetStaleMessageException extends DuvetApiException {
       required super.statusCode,
       super.reasonPhrase,
       super.body,
+      super.retryAfter,
       required this.generation,
       required this.epoch});
 }
@@ -98,6 +116,7 @@ class DuvetEpochTakenException extends DuvetApiException {
       required super.statusCode,
       super.reasonPhrase,
       super.body,
+      super.retryAfter,
       required this.generation,
       required this.epoch});
 }
@@ -113,6 +132,7 @@ class DuvetIdentityChangedException extends DuvetApiException {
       required super.statusCode,
       super.reasonPhrase,
       super.body,
+      super.retryAfter,
       this.identityKey});
 }
 
@@ -128,6 +148,7 @@ class DuvetDeviceListChangedException extends DuvetApiException {
       required super.statusCode,
       super.reasonPhrase,
       super.body,
+      super.retryAfter,
       required this.deviceList,
       required this.version});
 }
@@ -143,6 +164,7 @@ class DuvetCommitRefusedException extends DuvetApiException {
       required super.statusCode,
       super.reasonPhrase,
       super.body,
+      super.retryAfter,
       required this.code});
 }
 

@@ -142,7 +142,8 @@ class RestClient with RestMethods {
           action: 'refresh session',
           statusCode: response.statusCode,
           reasonPhrase: response.reasonPhrase,
-          body: response.body);
+          body: response.body,
+          retryAfter: retryAfterOf(response.headers));
     }
     return _keep(response);
   }

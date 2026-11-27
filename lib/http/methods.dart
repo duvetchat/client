@@ -1839,6 +1839,7 @@ mixin RestMethods {
         action: action,
         statusCode: response.statusCode,
         body: response.body,
+        retryAfter: retryAfterOf(response.headers),
       );
     }
 

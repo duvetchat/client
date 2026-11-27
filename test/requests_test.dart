@@ -236,6 +236,19 @@ void main() {
       expect(c.api.sessionToken, isEmpty);
     });
 
+    test('a rejected refresh says how long the API asks to wait', () async {
+      for (final status in [401, 403]) {
+        final c = _client(
+            (_) => http.Response('', status, headers: {'retry-after': '4'}));
+        await expectLater(
+            c.api.refreshSession(),
+            throwsA(isA<DuvetAuthException>()
+                .having((e) => e.statusCode, 'statusCode', status)
+                .having((e) => e.retryAfter, 'retryAfter',
+                    const Duration(seconds: 4))));
+      }
+    });
+
     test('a rate-limited refresh waits and tries again', () async {
       var refreshes = 0;
       final c = _client((s) {
@@ -1756,6 +1769,16 @@ void main() {
         final unsaid =
             await refusal(429, limited, headers: headers) as DuvetApiException;
         expect(unsaid.retryAfter, isNull, reason: '$headers');
+      }
+    });
+
+    test('a 401 and a 403 say it too', () async {
+      for (final status in [401, 403]) {
+        final e = await refusal(status, {'error': 'not now'},
+            headers: {'retry-after': '9'});
+        expect(e, isA<DuvetAuthException>(), reason: '$status');
+        expect((e as DuvetAuthException).retryAfter, const Duration(seconds: 9),
+            reason: '$status');
       }
     });
 

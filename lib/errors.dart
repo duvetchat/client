@@ -43,7 +43,10 @@ Duration? retryAfterOf(Map<String, String> headers) =>
 /// Thrown when authentication credentials are invalid or missing.
 class DuvetAuthException extends DuvetApiException {
   const DuvetAuthException(
-      {required super.action, required super.statusCode, super.body})
+      {required super.action,
+      required super.statusCode,
+      super.body,
+      super.retryAfter})
       : super(reasonPhrase: 'Unauthorized');
 }
 

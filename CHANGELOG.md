@@ -1,10 +1,9 @@
 ## Unreleased
 
-What the mobile app's end-to-end encryption needs, for the API version that
-brings it (its `e2e` branch): its routes, objects and events, the client's
-name, raw uploads, downloads from signed URLs and the refusals it tells apart.
-Calls, names and behavior from before stay, but for what "Breaking changes"
-lists.
+What the mobile app needs of the API with end-to-end encryption: its routes,
+objects and events, the client's name, raw uploads, downloads from signed URLs
+and the refusals it tells apart. Calls, names and behavior from before stay,
+but for what "Breaking changes" lists.
 
 ### Breaking changes
 
@@ -30,6 +29,12 @@ lists.
   `DeviceAddedEvent`, `DeviceRemovedEvent`, `IdentityUpdatedEvent`,
   `HistoryShareCreatedEvent` and `DMMessageEditedEvent` (see "Added"). A
   `switch` over it without a default case has to handle them.
+- `RestMethods.request` takes `bytes`, and its `fields` any values
+  (`Map<String, Object>`, a list repeating its field), and `resetPassword`
+  takes `removeDevices`: a class that overrides either has to take them too.
+- `RestMethods` has `duvetClient`, and `GatewayEvents` ten new streams
+  (`onDMEdit`, `onMlsCommit` and the like, see "Added"): a class that
+  implements either, rather than mixing it in, has to add them.
 
 ### Added
 

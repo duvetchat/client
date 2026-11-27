@@ -171,6 +171,25 @@ class DuvetCommitRefusedException extends DuvetApiException {
       required this.code});
 }
 
+/// Thrown by `E2eApi` when the API took a request, with a 2xx, but its answer
+/// doesn't read: what the request asked for was done (a commit taken, a
+/// device list or a message kept), and only its answer is lost, unlike a
+/// [DuvetApiException]'s refusal. [cause] is what reading it threw: a
+/// [FormatException], or a [TypeError] for a field that's missing or of
+/// another type.
+class DuvetMalformedAnswerException extends DuvetException {
+  final int statusCode;
+  final String body;
+  final Object cause;
+
+  const DuvetMalformedAnswerException(
+      {required this.statusCode, required this.body, required this.cause})
+      : super('Received a malformed answer from the API');
+
+  @override
+  String toString() => 'DuvetMalformedAnswerException[$statusCode]: $cause';
+}
+
 /// Thrown when the gateway receives a malformed message.
 class DuvetMalformedMessageException extends DuvetException {
   final Object cause;

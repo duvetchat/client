@@ -2732,6 +2732,79 @@ void main() {
       expect((count.day, count.kind, count.client, count.version, count.count),
           ('2026-11-24', 'message', 'android', '1.1.0', 3));
     });
+
+    test(
+        'a 2xx answer that doesn\'t read is a DuvetMalformedAnswerException: '
+        'the API took the request', () async {
+      final calls = <String, Future<Object?> Function(E2eApi)>{
+        'config': (e) => e.config(),
+        'deviceChallenge': (e) => e.deviceChallenge(),
+        'registerDevice': (e) => e.registerDevice(const DeviceRegistration(
+            deviceId: 'd1',
+            name: 'Pixel 8 Pro',
+            signatureKey: 'c2ln',
+            hpkeKey: 'aHBrZQ==',
+            proof: 'cHJvb2Y=')),
+        'devices': (e) => e.devices(),
+        'putIdentity': (e) => e.putIdentity(const IdentityUpload(
+            identityKey: 'aWQ=',
+            deviceList: 'bGlzdA==',
+            certificate: 'Y2VydA==',
+            encryptedIdentity: 'ZW5j',
+            wrappedBackupKey: 'd3JhcA==')),
+        'putDeviceList': (e) => e.putDeviceList(
+            const DeviceListUpload(deviceList: 'bGlzdA==', baseVersion: 3)),
+        'identity': (e) => e.identity('u2'),
+        'identities': (e) => e.identities(['u2']),
+        'identityBackup': (e) => e.identityBackup(),
+        'putKeyPackages': (e) => e.putKeyPackages(const []),
+        'claimKeyPackages': (e) => e.claimKeyPackages('u2'),
+        'groupInfo': (e) => e.groupInfo('c1'),
+        'commit': (e) => e.commit('c1', commit),
+        'queue': (e) => e.queue('c1', 0),
+        'addMember': (e) => e.addMember('c1', 'u2', commit),
+        'removeMember': (e) => e.removeMember('c1', 'u2', commit),
+        'sendMessage': (e) => e.sendMessage(
+            'c1', const EncryptedMessage(ciphertext: 'Y2lwaGVy', nonce: 'n1')),
+        'editMessage': (e) => e.editMessage('c1', 'm1', 'ZWRpdA=='),
+        'deleteMessage': (e) => e.deleteMessage('c1', 'm1', 'dG9tYg=='),
+        'deletedMessages': (e) => e.deletedMessages('c1'),
+        'sendToDevice': (e) => e.sendToDevice('d2', 'bXNn'),
+        'inbox': (e) => e.inbox(),
+        'putShare': (e) => e.putShare(
+            'c1',
+            's1',
+            HistoryShareUpload(
+                toUserId: 'u2',
+                kind: 'share',
+                range: 'week',
+                startsAt: DateTime.utc(2026, 11, 18),
+                size: 16,
+                parts: 1)),
+        'shares': (e) => e.shares(),
+        'sharePart': (e) => e.sharePart('s1', 0),
+        'segments': (e) => e.segments(),
+        'putSegment': (e) => e.putSegment('c1', '2026-11-24', [1, 2]),
+        'segment': (e) => e.segment('g1'),
+        'decryptFailures': (e) => e.decryptFailures(),
+      };
+      // Not JSON, and JSON of no answer's shape.
+      for (final (body, cause) in [
+        ('<html>', isA<FormatException>()),
+        ('"taken"', isA<TypeError>()),
+      ]) {
+        for (final MapEntry(key: name, value: call) in calls.entries) {
+          final c = e2e((_) => http.Response(body, 200));
+          await expectLater(
+              call(c.e2e),
+              throwsA(isA<DuvetMalformedAnswerException>()
+                  .having((e) => e.statusCode, 'statusCode', 200)
+                  .having((e) => e.body, 'body', body)
+                  .having((e) => e.cause, 'cause', cause)),
+              reason: '$name answered $body');
+        }
+      }
+    });
   });
 
   // A part's, a segment's or an encrypted attachment's file, at the URL the

@@ -74,6 +74,10 @@ but for what "Breaking changes" lists.
   `DuvetDeviceListChangedException` (409s, with what each carries) and
   `DuvetCommitRefusedException` (a 422's `code`). Any other error reads as
   before.
+- **An answer that doesn't read**: a 2xx answer of `E2eApi`'s that doesn't
+  read is a `DuvetMalformedAnswerException`, with its `statusCode`, `body` and
+  `cause`, never a `TypeError` or a `FormatException`: the API took the
+  request, and only its answer is lost.
 - **How long a refusal asks to wait** (duvetchat/client#52):
   `DuvetApiException.retryAfter` is the answer's `Retry-After` in seconds, as
   the API sends it with its 429s and 503s, or null when it doesn't say. Every

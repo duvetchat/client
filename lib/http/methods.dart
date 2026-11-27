@@ -1111,24 +1111,9 @@ mixin RestMethods {
     return Conversation.fromJson(_decodeMap(response));
   }
 
-  Future<ConversationMember> addConversationMember(
-      String conversationId, String userId) async {
-    final response = await request(
-        'POST',
-        '/api/users/@me/conversations/$conversationId/members',
-        'add conversation member',
-        json: {'user_id': userId});
-    return ConversationMember.fromJson(_decodeMap(response));
-  }
-
-  Future<void> removeConversationMember(
-      String conversationId, String userId) async {
-    await request(
-        'DELETE',
-        '/api/users/@me/conversations/$conversationId/members/$userId',
-        'remove conversation member');
-  }
-
+  /// Leaves without a statement, which the API with end-to-end encryption
+  /// takes only where the conversation has no group yet. Where it has one,
+  /// the user leaves with their statement: `E2eApi.leave`.
   Future<void> leaveConversation(String conversationId) async {
     await request(
         'DELETE',
@@ -1195,6 +1180,10 @@ mixin RestMethods {
         'unpin conversation message');
   }
 
+  /// Only a search without words: the API with end-to-end encryption can't
+  /// read a conversation's text, which the device searches, and refuses a
+  /// [MessageSearch.query] (a 400). In a conversation, `has` takes `file` and
+  /// `sticker`.
   Future<MessageSearchResponse<DirectMessage>> searchConversationMessages(
       String conversationId, MessageSearch search) async {
     final response = await request(
@@ -1216,54 +1205,6 @@ mixin RestMethods {
     return _decodeList(response, DirectMessage.fromJson);
   }
 
-  /// Sends a message to the conversation. With [files], it goes as a
-  /// multipart form, which carries no [embeds] or sticker. [allowedMentions],
-  /// [onProgress] and [abortTrigger] work as [sendMessage]'s.
-  Future<DirectMessage> sendDirectMessage(
-    String conversationId,
-    String content, {
-    String? nonce,
-    MessageReference? messageReference,
-    AllowedMentions? allowedMentions,
-    List<File>? files,
-    List<Embed>? embeds,
-    String? stickerAttachmentId,
-    void Function(int sent, int total)? onProgress,
-    Future<void>? abortTrigger,
-  }) async {
-    final response = await _sendMessage(
-        '/api/users/@me/conversations/$conversationId/messages', content,
-        nonce: nonce,
-        messageReference: messageReference,
-        allowedMentions: allowedMentions,
-        files: files,
-        embeds: embeds,
-        stickerAttachmentId: stickerAttachmentId,
-        onProgress: onProgress,
-        abortTrigger: abortTrigger);
-    return DirectMessage.fromJson(_decodeMap(response));
-  }
-
-  /// Sends a voice message to the conversation: [audio] is a recording in
-  /// [format], as [sendVoiceNote] takes it.
-  Future<DirectMessage> sendDMVoiceNote(String conversationId, List<int> audio,
-      {String? nonce, String format = 'webm'}) async {
-    final response = await _sendVoiceNote(
-        '/api/users/@me/conversations/$conversationId/messages', audio,
-        nonce: nonce, format: format);
-    return DirectMessage.fromJson(_decodeMap(response));
-  }
-
-  Future<DirectMessage> updateDirectMessage(
-      String conversationId, String messageId, String content) async {
-    final response = await request(
-        'PATCH',
-        '/api/users/@me/conversations/$conversationId/messages/$messageId',
-        'update direct message',
-        json: {'content': content});
-    return DirectMessage.fromJson(_decodeMap(response));
-  }
-
   /// Tells the conversation the user is typing.
   Future<void> sendConversationTyping(String conversationId) async {
     await request('POST', '/api/users/@me/conversations/$conversationId/typing',
@@ -1278,6 +1219,10 @@ mixin RestMethods {
         'send conversation recording');
   }
 
+  /// Deletes a notice: a pin's, a call's or a history share's (a group's owner,
+  /// and in a DM either member), from a session bound to a listed device. The
+  /// API with end-to-end encryption deletes an encrypted message only with its
+  /// tombstone: `E2eApi.deleteMessage`.
   Future<void> deleteDirectMessage(
       String conversationId, String messageId) async {
     await request(

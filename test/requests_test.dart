@@ -392,18 +392,14 @@ void main() {
           MessageReference(type: MessageReferenceType.reply, messageId: 'm0');
       const silent = AllowedMentions(repliedUser: false);
 
-      final c = _client((s) => s.path.startsWith('/api/rooms')
-          ? _message
-          : {..._message, 'conversation_id': 'c1'});
+      final c = _client((_) => _message);
       await c.api.sendMessage('r1', 'hi',
           messageReference: reply, allowedMentions: silent);
-      await c.api.sendDirectMessage('c1', 'hi',
+      await c.api.sendMessage('r1', 'hi',
           messageReference: reply,
           allowedMentions: const AllowedMentions(repliedUser: true));
       // In a form, a JSON string, as message_reference.
       await c.api.sendMessage('r1', 'look',
-          messageReference: reply, allowedMentions: silent, files: [file]);
-      await c.api.sendDirectMessage('c1', 'look',
           messageReference: reply, allowedMentions: silent, files: [file]);
 
       expect(c.sent[0].json, {
@@ -411,13 +407,9 @@ void main() {
         'message_reference': {'type': 0, 'message_id': 'm0'},
         'allowed_mentions': {'replied_user': false},
       });
-      expect(c.sent[1].path, '/api/users/@me/conversations/c1/messages');
       expect(c.sent[1].json['allowed_mentions'], {'replied_user': true});
-      for (final s in c.sent.sublist(2)) {
-        expect(s.request.body,
-            contains('name="allowed_mentions"\r\n\r\n{"replied_user":false}'));
-      }
-      expect(c.sent[3].path, '/api/users/@me/conversations/c1/messages');
+      expect(c.sent[2].request.body,
+          contains('name="allowed_mentions"\r\n\r\n{"replied_user":false}'));
     });
 
     test('sendVoiceNote sends a WebM file of type 1', () async {
@@ -431,15 +423,12 @@ void main() {
     });
 
     test('voice notes name their format: Ogg/Opus or AAC in MP4', () async {
-      final c = _client((s) => s.path.startsWith('/api/rooms')
-          ? {..._message, 'type': 1}
-          : {..._message, 'type': 1, 'conversation_id': 'c1'});
+      final c = _client((_) => {..._message, 'type': 1});
       await c.api.sendVoiceNote('r1', [1], format: 'ogg');
-      final dm = await c.api.sendDMVoiceNote('c1', [1], format: 'm4a');
-      expect(dm.type, MessageType.voice);
+      final m4a = await c.api.sendVoiceNote('r1', [1], format: 'm4a');
+      expect(m4a.type, MessageType.voice);
       expect(c.sent[0].request.body, contains('filename="voice-note.ogg"'));
       expect(c.sent[0].request.body, contains('content-type: audio/ogg'));
-      expect(c.sent[1].path, '/api/users/@me/conversations/c1/messages');
       expect(c.sent[1].request.body, contains('name="type"\r\n\r\n1'));
       expect(c.sent[1].request.body, contains('filename="voice-note.m4a"'));
       expect(c.sent[1].request.body, contains('content-type: audio/mp4'));
@@ -458,9 +447,9 @@ void main() {
       final file = File('${dir.path}/big.bin')
         ..writeAsBytesSync(List.filled(300 * 1024, 7));
 
-      final c = _client((_) => {..._message, 'conversation_id': 'c1'});
+      final c = _client((_) => _message);
       final progress = <(int, int)>[];
-      await c.api.sendDirectMessage('c1', 'look',
+      await c.api.sendMessage('r1', 'look',
           files: [file],
           onProgress: (sent, total) => progress.add((sent, total)));
       final total = c.sent.single.request.bodyBytes.length;
@@ -1118,8 +1107,6 @@ void main() {
       final c = _client((s) => s.method == 'GET' ? [dm] : dm);
       await c.api.getDirectMessages('c1', before: 'd0');
       await c.api.getDirectMessagesAfter('c1', 'd0');
-      await c.api.sendDirectMessage('c1', 'yo', nonce: 'n');
-      await c.api.updateDirectMessage('c1', 'd1', 'edit');
       expect(c.sent[0].path, '/api/users/@me/conversations/c1/messages');
       expect(c.sent[0].query, {
         'count': ['100'],
@@ -1130,8 +1117,6 @@ void main() {
         'count': ['100'],
         'after': ['d0'],
       });
-      expect(c.sent[2].json, {'content': 'yo', 'nonce': 'n'});
-      expect(c.sent[3].json, {'content': 'edit'});
     });
 
     test('a message\'s thread', () async {
@@ -1148,18 +1133,78 @@ void main() {
 
     test('members, pins, typing', () async {
       final c = _client((_) => null);
-      await c.api.removeConversationMember('c1', 'u2');
       await c.api.leaveConversation('c1');
       await c.api.pinConversationMessage('c1', 'd1');
       await c.api.sendConversationTyping('c1');
       await c.api.sendConversationRecording('c1');
       expect(c.sent.map((s) => '${s.method} ${s.path}'), [
-        'DELETE /api/users/@me/conversations/c1/members/u2',
         'DELETE /api/users/@me/conversations/c1/members/@me',
         'PUT /api/users/@me/conversations/c1/pins/d1',
         'POST /api/users/@me/conversations/c1/typing',
         'POST /api/users/@me/conversations/c1/recording',
       ]);
+    });
+
+    test(
+        'no call sends a conversation\'s text or a file in the clear, or '
+        'changes its members without a commit', () {
+      // Each member of a class, mixin or extension in lib/, from its first
+      // line (two spaces in, as dart format sets it) to the next one's,
+      // without its comments.
+      final members = [
+        for (final file in Directory('lib').listSync(recursive: true))
+          if (file is File && file.path.endsWith('.dart'))
+            for (final member in file
+                .readAsStringSync()
+                .replaceAll('\r\n', '\n')
+                .split(RegExp(r'\n(?=  [A-Za-z_@])')))
+              member
+                  .split('\n')
+                  .where((line) => !line.trimLeft().startsWith('//'))
+                  .join('\n'),
+      ];
+      String name(String member) =>
+          RegExp(r'(\w+)\(').firstMatch(member)?[1] ?? member;
+      // A message's text, or a form's file whose fields aren't an
+      // EncryptedMessage's (whose ciphertext seals the message and names its
+      // sealed files).
+      bool plain(String member) =>
+          member.contains("'content'") ||
+          (member.contains('files:') && !member.contains('EncryptedMessage'));
+      // The private helpers that post either, to a path their callers give.
+      final helpers = {
+        for (final member in members)
+          if (plain(member))
+            if (RegExp(r'^  [^(\n]*?\b(_\w+)\(').firstMatch(member)
+                case final helper?)
+              helper[1]!,
+      };
+      final messages = RegExp(r'conversations/\$\{?[\w.]+\}?/messages');
+      // A member's addition or removal, not leaving (@me).
+      final memberChanges =
+          RegExp(r'conversations/\$\{?[\w.]+\}?/members(?!/@me)');
+      final toMessages = [
+        for (final member in members)
+          if (messages.hasMatch(member)) member
+      ];
+      final toMembers = [
+        for (final member in members)
+          if (memberChanges.hasMatch(member)) member
+      ];
+
+      expect([
+        for (final member in toMessages)
+          if (plain(member) || helpers.any((h) => member.contains('$h(')))
+            name(member),
+        for (final member in toMembers)
+          if (!member.contains('Commit ')) name(member),
+      ], isEmpty);
+      // It reads both kinds of call: the history's and end-to-end
+      // encryption's.
+      expect(helpers, containsAll(['_sendMessage', '_sendVoiceNote']));
+      expect(toMessages.map(name),
+          containsAll(['getDirectMessages', 'sendMessage', 'editMessage']));
+      expect(toMembers.map(name), containsAll(['addMember', 'removeMember']));
     });
   });
 

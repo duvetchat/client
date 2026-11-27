@@ -3,10 +3,27 @@
 What the mobile app's end-to-end encryption needs, for the API version that
 brings it (its `e2e` branch): its routes, objects and events, the client's
 name, raw uploads, downloads from signed URLs and the refusals it tells apart.
-Everything is new or optional: calls, names and behavior from before stay.
+Calls, names and behavior from before stay, but for what "Breaking changes"
+lists.
 
 ### Breaking changes
 
+- **The conversation calls that sent in the clear are gone**: the API with
+  end-to-end encryption refuses each of them, and each sent a conversation's
+  text, a recording, or a change of its members without its group's commit.
+  In their place, `E2eApi`'s:
+  - `sendDirectMessage`: `E2eApi.sendMessage`, the message sealed in its
+    `ciphertext` and its files sealed;
+  - `sendDMVoiceNote`: `E2eApi.sendMessage` too, the recording sealed among
+    its files;
+  - `updateDirectMessage`: `E2eApi.editMessage`;
+  - `addConversationMember`: `E2eApi.addMember`, with the owner's commit;
+  - `removeConversationMember`: `E2eApi.removeMember`, with the owner's
+    commit.
+
+  `leaveConversation`, `deleteDirectMessage` and `searchConversationMessages`
+  stay, for what that API takes from them: leaving a conversation with no
+  group, deleting a notice, and a search without words.
 - Ten events join the sealed `GatewayEventPayload`: `MlsCommitPayloadEvent`,
   `MlsWelcomePayloadEvent`, `MlsProposalPayloadEvent`,
   `DeviceMessagePayloadEvent`, `KeyPackagesLowPayloadEvent`,

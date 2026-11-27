@@ -13,8 +13,9 @@ List<String> _strings(Object? j) =>
 /// conversation (`GET /api/e2e`).
 class E2eConfig {
   /// The public key the API signs its proposals to remove a device from a
-  /// group with: the engine keeps the first it sees.
-  final String externalSender;
+  /// group with: the engine keeps the first it sees. Null on an API without
+  /// one, which makes no group.
+  final String? externalSender;
 
   /// When the conversations from before end-to-end encryption lost their
   /// messages; null before the cutover.
@@ -29,7 +30,7 @@ class E2eConfig {
   final E2eLimits limits;
 
   const E2eConfig({
-    required this.externalSender,
+    this.externalSender,
     this.cutoverAt,
     required this.paused,
     required this.minClients,
@@ -37,7 +38,7 @@ class E2eConfig {
   });
 
   E2eConfig.fromJson(Map<String, dynamic> j)
-      : externalSender = j['external_sender'] as String,
+      : externalSender = j['external_sender'] as String?,
         cutoverAt = _parseDate(j['cutover_at']),
         paused = j['paused'] as bool,
         minClients = {

@@ -1908,6 +1908,15 @@ void main() {
             'limits': limits,
           });
       expect((await before.e2e.config()).cutoverAt, isNull);
+      // An API without its external sender's key, which makes no group.
+      final none = e2e((_) => {
+            'external_sender': null,
+            'cutover_at': null,
+            'paused': false,
+            'min_clients': <String, String>{},
+            'limits': limits,
+          });
+      expect((await none.e2e.config()).externalSender, isNull);
     });
 
     test('devices, and the session\'s binding to one', () async {

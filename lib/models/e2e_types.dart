@@ -1023,7 +1023,9 @@ class KeyPackagesLowPayloadEvent extends GatewayEventPayload {
   const KeyPackagesLowPayloadEvent(this.data);
 }
 
-/// DEVICE_ADD: a device the user registered, to every session of theirs.
+/// DEVICE_ADD: a device of the user's, to every session of theirs: one they
+/// registered, and each one a device list lists as it takes the current
+/// one's place.
 class DeviceAddedEvent extends GatewayEventPayload {
   final UserDevice data;
   const DeviceAddedEvent(this.data);

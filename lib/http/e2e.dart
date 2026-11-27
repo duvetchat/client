@@ -51,7 +51,11 @@ List<String> _ids(Object? j) =>
 /// [DuvetIdentityChangedException] and [DuvetDeviceListChangedException]
 /// (409) and [DuvetCommitRefusedException] (422). Any other keeps its status
 /// and body: a queue read from below its floor is a 410 with `floor_seq`, a
-/// day of the backup another segment holds a 409 with `current`.
+/// day of the backup another segment holds a 409 with `current`. A 401 and a
+/// 403 are [DuvetAuthException]s, encryption's 403s among them, which the
+/// engine reads by their body's `error`: `this session has no device`, `this
+/// device isn't on your device list` (a listed device's route) and `the proof
+/// doesn't verify` (a registration or a bind).
 ///
 /// A 2xx answer that doesn't read is a [DuvetMalformedAnswerException]: the
 /// API took the request (a commit, a device list, a message), and only its
@@ -130,8 +134,8 @@ class E2eApi {
       await api.request('GET', '/api/users/$userId/identity', 'get identity'),
       Identity.fromJson);
 
-  /// The identities of 50 users at most; those the user may not read, or
-  /// without one, are left out.
+  /// The identities of 1 to 50 users (a 400 for none, or more); those the
+  /// user may not read, or without one, are left out.
   Future<List<Identity>> identities(List<String> userIds) async => _objects(
       await api.request('GET', '/api/users/identities', 'get identities',
           query: {'ids': userIds.join(',')}),

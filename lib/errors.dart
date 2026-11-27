@@ -40,7 +40,9 @@ Duration? retryAfterOf(Map<String, String> headers) =>
       _ => null,
     };
 
-/// Thrown when authentication credentials are invalid or missing.
+/// Thrown for a 401, the credentials invalid or missing, and for a 403, a
+/// request they may not make: end-to-end encryption's 403s say which by their
+/// [body] (`E2eApi`'s doc names them).
 class DuvetAuthException extends DuvetApiException {
   const DuvetAuthException(
       {required super.action,

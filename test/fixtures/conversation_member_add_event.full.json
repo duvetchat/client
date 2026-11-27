@@ -6,5 +6,8 @@
   "alias": "s-string",
   "avatar": "s-string",
   "banner": "s-string",
-  "status_id": 2
+  "status_id": 2,
+  "client_status": {
+    "s-string": 2
+  }
 }

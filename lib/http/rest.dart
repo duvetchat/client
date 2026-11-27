@@ -135,7 +135,8 @@ class RestClient with RestMethods {
       throw DuvetAuthException(
           action: 'refresh session',
           statusCode: response.statusCode,
-          body: response.body);
+          body: response.body,
+          retryAfter: retryAfterOf(response.headers));
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw DuvetApiException(

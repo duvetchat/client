@@ -1,0 +1,25 @@
+{
+  "entries": [
+    {
+      "seq": 2,
+      "kind": "s-string",
+      "data": "Ag==",
+      "sent_at": 2,
+      "generation": 2,
+      "epoch": 2,
+      "message_id": "12020202-0202-7002-8002-020202020202",
+      "sender_user": "12020202-0202-7002-8002-020202020202",
+      "sender_device": "12020202-0202-7002-8002-020202020202",
+      "statement": "Ag==",
+      "deleted": true,
+      "mentions": [
+        "12020202-0202-7002-8002-020202020202"
+      ],
+      "reply_to": "12020202-0202-7002-8002-020202020202"
+    }
+  ],
+  "last_seq": 2,
+  "floor_seq": 2,
+  "generation": 2,
+  "epoch": 2
+}

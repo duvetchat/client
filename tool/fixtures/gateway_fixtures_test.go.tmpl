@@ -13,6 +13,9 @@ func TestWriteFixtures(t *testing.T) {
 	w("ready_event", of[gw.ReadyEvent])
 	w("bot_ready_event", of[gw.BotReadyEvent])
 	w("space_create_event", of[gw.SpaceCreateEvent])
+	// A person's ROOM_CREATE has their read state in the room.
+	w("room_create_event", of[gw.RoomCreateEvent])
+	w("room_read_state", of[gw.RoomReadState])
 	w("call_incoming_event", of[gw.CallIncomingEvent])
 	w("call_outgoing_event", of[gw.CallOutgoingEvent])
 	w("call_ongoing_event", of[gw.CallOngoingEvent])

@@ -236,6 +236,19 @@ void main() {
       expect(c.api.sessionToken, isEmpty);
     });
 
+    test('a rejected refresh says how long the API asks to wait', () async {
+      for (final status in [401, 403]) {
+        final c = _client(
+            (_) => http.Response('', status, headers: {'retry-after': '4'}));
+        await expectLater(
+            c.api.refreshSession(),
+            throwsA(isA<DuvetAuthException>()
+                .having((e) => e.statusCode, 'statusCode', status)
+                .having((e) => e.retryAfter, 'retryAfter',
+                    const Duration(seconds: 4))));
+      }
+    });
+
     test('a rate-limited refresh waits and tries again', () async {
       var refreshes = 0;
       final c = _client((s) {
@@ -392,18 +405,14 @@ void main() {
           MessageReference(type: MessageReferenceType.reply, messageId: 'm0');
       const silent = AllowedMentions(repliedUser: false);
 
-      final c = _client((s) => s.path.startsWith('/api/rooms')
-          ? _message
-          : {..._message, 'conversation_id': 'c1'});
+      final c = _client((_) => _message);
       await c.api.sendMessage('r1', 'hi',
           messageReference: reply, allowedMentions: silent);
-      await c.api.sendDirectMessage('c1', 'hi',
+      await c.api.sendMessage('r1', 'hi',
           messageReference: reply,
           allowedMentions: const AllowedMentions(repliedUser: true));
       // In a form, a JSON string, as message_reference.
       await c.api.sendMessage('r1', 'look',
-          messageReference: reply, allowedMentions: silent, files: [file]);
-      await c.api.sendDirectMessage('c1', 'look',
           messageReference: reply, allowedMentions: silent, files: [file]);
 
       expect(c.sent[0].json, {
@@ -411,13 +420,9 @@ void main() {
         'message_reference': {'type': 0, 'message_id': 'm0'},
         'allowed_mentions': {'replied_user': false},
       });
-      expect(c.sent[1].path, '/api/users/@me/conversations/c1/messages');
       expect(c.sent[1].json['allowed_mentions'], {'replied_user': true});
-      for (final s in c.sent.sublist(2)) {
-        expect(s.request.body,
-            contains('name="allowed_mentions"\r\n\r\n{"replied_user":false}'));
-      }
-      expect(c.sent[3].path, '/api/users/@me/conversations/c1/messages');
+      expect(c.sent[2].request.body,
+          contains('name="allowed_mentions"\r\n\r\n{"replied_user":false}'));
     });
 
     test('sendVoiceNote sends a WebM file of type 1', () async {
@@ -431,15 +436,12 @@ void main() {
     });
 
     test('voice notes name their format: Ogg/Opus or AAC in MP4', () async {
-      final c = _client((s) => s.path.startsWith('/api/rooms')
-          ? {..._message, 'type': 1}
-          : {..._message, 'type': 1, 'conversation_id': 'c1'});
+      final c = _client((_) => {..._message, 'type': 1});
       await c.api.sendVoiceNote('r1', [1], format: 'ogg');
-      final dm = await c.api.sendDMVoiceNote('c1', [1], format: 'm4a');
-      expect(dm.type, MessageType.voice);
+      final m4a = await c.api.sendVoiceNote('r1', [1], format: 'm4a');
+      expect(m4a.type, MessageType.voice);
       expect(c.sent[0].request.body, contains('filename="voice-note.ogg"'));
       expect(c.sent[0].request.body, contains('content-type: audio/ogg'));
-      expect(c.sent[1].path, '/api/users/@me/conversations/c1/messages');
       expect(c.sent[1].request.body, contains('name="type"\r\n\r\n1'));
       expect(c.sent[1].request.body, contains('filename="voice-note.m4a"'));
       expect(c.sent[1].request.body, contains('content-type: audio/mp4'));
@@ -458,9 +460,9 @@ void main() {
       final file = File('${dir.path}/big.bin')
         ..writeAsBytesSync(List.filled(300 * 1024, 7));
 
-      final c = _client((_) => {..._message, 'conversation_id': 'c1'});
+      final c = _client((_) => _message);
       final progress = <(int, int)>[];
-      await c.api.sendDirectMessage('c1', 'look',
+      await c.api.sendMessage('r1', 'look',
           files: [file],
           onProgress: (sent, total) => progress.add((sent, total)));
       final total = c.sent.single.request.bodyBytes.length;
@@ -1118,8 +1120,6 @@ void main() {
       final c = _client((s) => s.method == 'GET' ? [dm] : dm);
       await c.api.getDirectMessages('c1', before: 'd0');
       await c.api.getDirectMessagesAfter('c1', 'd0');
-      await c.api.sendDirectMessage('c1', 'yo', nonce: 'n');
-      await c.api.updateDirectMessage('c1', 'd1', 'edit');
       expect(c.sent[0].path, '/api/users/@me/conversations/c1/messages');
       expect(c.sent[0].query, {
         'count': ['100'],
@@ -1130,8 +1130,6 @@ void main() {
         'count': ['100'],
         'after': ['d0'],
       });
-      expect(c.sent[2].json, {'content': 'yo', 'nonce': 'n'});
-      expect(c.sent[3].json, {'content': 'edit'});
     });
 
     test('a message\'s thread', () async {
@@ -1148,18 +1146,78 @@ void main() {
 
     test('members, pins, typing', () async {
       final c = _client((_) => null);
-      await c.api.removeConversationMember('c1', 'u2');
       await c.api.leaveConversation('c1');
       await c.api.pinConversationMessage('c1', 'd1');
       await c.api.sendConversationTyping('c1');
       await c.api.sendConversationRecording('c1');
       expect(c.sent.map((s) => '${s.method} ${s.path}'), [
-        'DELETE /api/users/@me/conversations/c1/members/u2',
         'DELETE /api/users/@me/conversations/c1/members/@me',
         'PUT /api/users/@me/conversations/c1/pins/d1',
         'POST /api/users/@me/conversations/c1/typing',
         'POST /api/users/@me/conversations/c1/recording',
       ]);
+    });
+
+    test(
+        'no call sends a conversation\'s text or a file in the clear, or '
+        'changes its members without a commit', () {
+      // Each member of a class, mixin or extension in lib/, from its first
+      // line (two spaces in, as dart format sets it) to the next one's,
+      // without its comments.
+      final members = [
+        for (final file in Directory('lib').listSync(recursive: true))
+          if (file is File && file.path.endsWith('.dart'))
+            for (final member in file
+                .readAsStringSync()
+                .replaceAll('\r\n', '\n')
+                .split(RegExp(r'\n(?=  [A-Za-z_@])')))
+              member
+                  .split('\n')
+                  .where((line) => !line.trimLeft().startsWith('//'))
+                  .join('\n'),
+      ];
+      String name(String member) =>
+          RegExp(r'(\w+)\(').firstMatch(member)?[1] ?? member;
+      // A message's text, or a form's file whose fields aren't an
+      // EncryptedMessage's (whose ciphertext seals the message and names its
+      // sealed files).
+      bool plain(String member) =>
+          member.contains("'content'") ||
+          (member.contains('files:') && !member.contains('EncryptedMessage'));
+      // The private helpers that post either, to a path their callers give.
+      final helpers = {
+        for (final member in members)
+          if (plain(member))
+            if (RegExp(r'^  [^(\n]*?\b(_\w+)\(').firstMatch(member)
+                case final helper?)
+              helper[1]!,
+      };
+      final messages = RegExp(r'conversations/\$\{?[\w.]+\}?/messages');
+      // A member's addition or removal, not leaving (@me).
+      final memberChanges =
+          RegExp(r'conversations/\$\{?[\w.]+\}?/members(?!/@me)');
+      final toMessages = [
+        for (final member in members)
+          if (messages.hasMatch(member)) member
+      ];
+      final toMembers = [
+        for (final member in members)
+          if (memberChanges.hasMatch(member)) member
+      ];
+
+      expect([
+        for (final member in toMessages)
+          if (plain(member) || helpers.any((h) => member.contains('$h(')))
+            name(member),
+        for (final member in toMembers)
+          if (!member.contains('Commit ')) name(member),
+      ], isEmpty);
+      // It reads both kinds of call: the history's and end-to-end
+      // encryption's.
+      expect(helpers, containsAll(['_sendMessage', '_sendVoiceNote']));
+      expect(toMessages.map(name),
+          containsAll(['getDirectMessages', 'sendMessage', 'editMessage']));
+      expect(toMembers.map(name), containsAll(['addMember', 'removeMember']));
     });
   });
 
@@ -1714,6 +1772,16 @@ void main() {
       }
     });
 
+    test('a 401 and a 403 say it too', () async {
+      for (final status in [401, 403]) {
+        final e = await refusal(status, {'error': 'not now'},
+            headers: {'retry-after': '9'});
+        expect(e, isA<DuvetAuthException>(), reason: '$status');
+        expect((e as DuvetAuthException).retryAfter, const Duration(seconds: 9),
+            reason: '$status');
+      }
+    });
+
     test('the 409s the engine tells apart, with what each carries', () async {
       final stale = await refusal(
               409, {'error': 'stale message', 'generation': 1, 'epoch': 9})
@@ -1740,6 +1808,45 @@ void main() {
         'version': 3
       }) as DuvetDeviceListChangedException;
       expect((list.deviceList, list.version), ('bGlzdA==', 3));
+    });
+
+    test('the 426\'s and the 409s\' bodies, as the API\'s own types write them',
+        () async {
+      Map<String, dynamic> body(String name, String variant) => jsonDecode(
+              File('test/fixtures/$name.$variant.json').readAsStringSync())
+          as Map<String, dynamic>;
+      for (final variant in ['full', 'nulls', 'partial']) {
+        final update = body('update_duvet', variant);
+        final required =
+            await refusal(426, update) as DuvetUpdateRequiredException;
+        expect((
+          required.client,
+          required.minimum
+        ), (
+          update['client'],
+          update['minimum']
+        ), reason: variant);
+        // Each 409 by the API's own error.
+        final stale = body('stale_message', variant);
+        final staleRefusal =
+            await refusal(409, stale) as DuvetStaleMessageException;
+        expect((staleRefusal.generation, staleRefusal.epoch),
+            (stale['generation'], stale['epoch']));
+        final taken = body('epoch_taken', variant);
+        final takenRefusal =
+            await refusal(409, taken) as DuvetEpochTakenException;
+        expect((takenRefusal.generation, takenRefusal.epoch),
+            (taken['generation'], taken['epoch']));
+        final identity = body('identity_changed', variant);
+        final identityRefusal =
+            await refusal(409, identity) as DuvetIdentityChangedException;
+        expect(identityRefusal.identityKey, identity['identity_key']);
+        final list = body('device_list_changed', variant);
+        final listRefusal =
+            await refusal(409, list) as DuvetDeviceListChangedException;
+        expect((listRefusal.deviceList, listRefusal.version),
+            (list['device_list'], list['version']));
+      }
     });
 
     test('a 422 names its code', () async {
@@ -1863,6 +1970,15 @@ void main() {
             'limits': limits,
           });
       expect((await before.e2e.config()).cutoverAt, isNull);
+      // An API without its external sender's key, which makes no group.
+      final none = e2e((_) => {
+            'external_sender': null,
+            'cutover_at': null,
+            'paused': false,
+            'min_clients': <String, String>{},
+            'limits': limits,
+          });
+      expect((await none.e2e.config()).externalSender, isNull);
     });
 
     test('devices, and the session\'s binding to one', () async {
@@ -2615,6 +2731,79 @@ void main() {
       final count = counts.single;
       expect((count.day, count.kind, count.client, count.version, count.count),
           ('2026-11-24', 'message', 'android', '1.1.0', 3));
+    });
+
+    test(
+        'a 2xx answer that doesn\'t read is a DuvetMalformedAnswerException: '
+        'the API took the request', () async {
+      final calls = <String, Future<Object?> Function(E2eApi)>{
+        'config': (e) => e.config(),
+        'deviceChallenge': (e) => e.deviceChallenge(),
+        'registerDevice': (e) => e.registerDevice(const DeviceRegistration(
+            deviceId: 'd1',
+            name: 'Pixel 8 Pro',
+            signatureKey: 'c2ln',
+            hpkeKey: 'aHBrZQ==',
+            proof: 'cHJvb2Y=')),
+        'devices': (e) => e.devices(),
+        'putIdentity': (e) => e.putIdentity(const IdentityUpload(
+            identityKey: 'aWQ=',
+            deviceList: 'bGlzdA==',
+            certificate: 'Y2VydA==',
+            encryptedIdentity: 'ZW5j',
+            wrappedBackupKey: 'd3JhcA==')),
+        'putDeviceList': (e) => e.putDeviceList(
+            const DeviceListUpload(deviceList: 'bGlzdA==', baseVersion: 3)),
+        'identity': (e) => e.identity('u2'),
+        'identities': (e) => e.identities(['u2']),
+        'identityBackup': (e) => e.identityBackup(),
+        'putKeyPackages': (e) => e.putKeyPackages(const []),
+        'claimKeyPackages': (e) => e.claimKeyPackages('u2'),
+        'groupInfo': (e) => e.groupInfo('c1'),
+        'commit': (e) => e.commit('c1', commit),
+        'queue': (e) => e.queue('c1', 0),
+        'addMember': (e) => e.addMember('c1', 'u2', commit),
+        'removeMember': (e) => e.removeMember('c1', 'u2', commit),
+        'sendMessage': (e) => e.sendMessage(
+            'c1', const EncryptedMessage(ciphertext: 'Y2lwaGVy', nonce: 'n1')),
+        'editMessage': (e) => e.editMessage('c1', 'm1', 'ZWRpdA=='),
+        'deleteMessage': (e) => e.deleteMessage('c1', 'm1', 'dG9tYg=='),
+        'deletedMessages': (e) => e.deletedMessages('c1'),
+        'sendToDevice': (e) => e.sendToDevice('d2', 'bXNn'),
+        'inbox': (e) => e.inbox(),
+        'putShare': (e) => e.putShare(
+            'c1',
+            's1',
+            HistoryShareUpload(
+                toUserId: 'u2',
+                kind: 'share',
+                range: 'week',
+                startsAt: DateTime.utc(2026, 11, 18),
+                size: 16,
+                parts: 1)),
+        'shares': (e) => e.shares(),
+        'sharePart': (e) => e.sharePart('s1', 0),
+        'segments': (e) => e.segments(),
+        'putSegment': (e) => e.putSegment('c1', '2026-11-24', [1, 2]),
+        'segment': (e) => e.segment('g1'),
+        'decryptFailures': (e) => e.decryptFailures(),
+      };
+      // Not JSON, and JSON of no answer's shape.
+      for (final (body, cause) in [
+        ('<html>', isA<FormatException>()),
+        ('"taken"', isA<TypeError>()),
+      ]) {
+        for (final MapEntry(key: name, value: call) in calls.entries) {
+          final c = e2e((_) => http.Response(body, 200));
+          await expectLater(
+              call(c.e2e),
+              throwsA(isA<DuvetMalformedAnswerException>()
+                  .having((e) => e.statusCode, 'statusCode', 200)
+                  .having((e) => e.body, 'body', body)
+                  .having((e) => e.cause, 'cause', cause)),
+              reason: '$name answered $body');
+        }
+      }
     });
   });
 

@@ -1,18 +1,40 @@
 ## Unreleased
 
-What the mobile app's end-to-end encryption needs, for the API version that
-brings it (its `e2e` branch): its routes, objects and events, the client's
-name, raw uploads, downloads from signed URLs and the refusals it tells apart.
-Everything is new or optional: calls, names and behavior from before stay.
+What the mobile app needs of the API with end-to-end encryption: its routes,
+objects and events, the client's name, raw uploads, downloads from signed URLs
+and the refusals it tells apart. Calls, names and behavior from before stay,
+but for what "Breaking changes" lists.
 
 ### Breaking changes
 
+- **The conversation calls that sent in the clear are gone**: the API with
+  end-to-end encryption refuses each of them, and each sent a conversation's
+  text, a recording, or a change of its members without its group's commit.
+  In their place, `E2eApi`'s:
+  - `sendDirectMessage`: `E2eApi.sendMessage`, the message sealed in its
+    `ciphertext` and its files sealed;
+  - `sendDMVoiceNote`: `E2eApi.sendMessage` too, the recording sealed among
+    its files;
+  - `updateDirectMessage`: `E2eApi.editMessage`;
+  - `addConversationMember`: `E2eApi.addMember`, with the owner's commit;
+  - `removeConversationMember`: `E2eApi.removeMember`, with the owner's
+    commit.
+
+  `leaveConversation`, `deleteDirectMessage` and `searchConversationMessages`
+  stay, for what that API takes from them: leaving a conversation with no
+  group, deleting a notice, and a search without words.
 - Ten events join the sealed `GatewayEventPayload`: `MlsCommitPayloadEvent`,
   `MlsWelcomePayloadEvent`, `MlsProposalPayloadEvent`,
   `DeviceMessagePayloadEvent`, `KeyPackagesLowPayloadEvent`,
   `DeviceAddedEvent`, `DeviceRemovedEvent`, `IdentityUpdatedEvent`,
   `HistoryShareCreatedEvent` and `DMMessageEditedEvent` (see "Added"). A
   `switch` over it without a default case has to handle them.
+- `RestMethods.request` takes `bytes`, and its `fields` any values
+  (`Map<String, Object>`, a list repeating its field), and `resetPassword`
+  takes `removeDevices`: a class that overrides either has to take them too.
+- `RestMethods` has `duvetClient`, and `GatewayEvents` ten new streams
+  (`onDMEdit`, `onMlsCommit` and the like, see "Added"): a class that
+  implements either, rather than mixing it in, has to add them.
 
 ### Added
 
@@ -52,6 +74,10 @@ Everything is new or optional: calls, names and behavior from before stay.
   `DuvetDeviceListChangedException` (409s, with what each carries) and
   `DuvetCommitRefusedException` (a 422's `code`). Any other error reads as
   before.
+- **An answer that doesn't read**: a 2xx answer of `E2eApi`'s that doesn't
+  read is a `DuvetMalformedAnswerException`, with its `statusCode`, `body` and
+  `cause`, never a `TypeError` or a `FormatException`: the API took the
+  request, and only its answer is lost.
 - **How long a refusal asks to wait** (duvetchat/client#52):
   `DuvetApiException.retryAfter` is the answer's `Retry-After` in seconds, as
   the API sends it with its 429s and 503s, or null when it doesn't say. Every

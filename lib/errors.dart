@@ -40,10 +40,15 @@ Duration? retryAfterOf(Map<String, String> headers) =>
       _ => null,
     };
 
-/// Thrown when authentication credentials are invalid or missing.
+/// Thrown for a 401, the credentials invalid or missing, and for a 403, a
+/// request they may not make: end-to-end encryption's 403s say which by their
+/// [body] (`E2eApi`'s doc names them).
 class DuvetAuthException extends DuvetApiException {
   const DuvetAuthException(
-      {required super.action, required super.statusCode, super.body})
+      {required super.action,
+      required super.statusCode,
+      super.body,
+      super.retryAfter})
       : super(reasonPhrase: 'Unauthorized');
 }
 
@@ -166,6 +171,25 @@ class DuvetCommitRefusedException extends DuvetApiException {
       super.body,
       super.retryAfter,
       required this.code});
+}
+
+/// Thrown by `E2eApi` when the API took a request, with a 2xx, but its answer
+/// doesn't read: what the request asked for was done (a commit taken, a
+/// device list or a message kept), and only its answer is lost, unlike a
+/// [DuvetApiException]'s refusal. [cause] is what reading it threw: a
+/// [FormatException], or a [TypeError] for a field that's missing or of
+/// another type.
+class DuvetMalformedAnswerException extends DuvetException {
+  final int statusCode;
+  final String body;
+  final Object cause;
+
+  const DuvetMalformedAnswerException(
+      {required this.statusCode, required this.body, required this.cause})
+      : super('Received a malformed answer from the API');
+
+  @override
+  String toString() => 'DuvetMalformedAnswerException[$statusCode]: $cause';
 }
 
 /// Thrown when the gateway receives a malformed message.

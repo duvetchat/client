@@ -28,7 +28,18 @@
         "flags": 2,
         "badges": 2
       },
-      "status_id": 2
+      "status_id": 2,
+      "client_status": {
+        "s-string": 2
+      }
     }
-  ]
+  ],
+  "legacy": true,
+  "mls": {
+    "generation": 2,
+    "epoch": 2,
+    "last_seq": 2,
+    "floor_seq": 2,
+    "joined_seq": 2
+  }
 }

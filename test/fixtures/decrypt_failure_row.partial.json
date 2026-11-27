@@ -1,0 +1,7 @@
+{
+  "day": "s-string",
+  "kind": "s-string",
+  "client": "s-string",
+  "version": "s-string",
+  "count": 2
+}

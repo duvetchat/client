@@ -18,6 +18,7 @@
       "height": 2,
       "created_at": "2026-10-22T10:00:00.123456789Z",
       "deleted_at": "2026-10-22T10:00:00.123456789Z",
+      "kind": 2,
       "url": "s-string"
     }
   ],
@@ -73,31 +74,11 @@
         "color_to": 2
       },
       "footer": {
-        "text": "s-string",
-        "icon_url": "s-string"
-      },
-      "image": {
-        "url": "s-string",
-        "width": 2,
-        "height": 2,
-        "content_type": "s-string"
-      },
-      "thumbnail": {
-        "url": "s-string",
-        "width": 2,
-        "height": 2,
-        "content_type": "s-string"
-      },
-      "video": {
-        "url": "s-string",
-        "width": 2,
-        "height": 2,
-        "content_type": "s-string"
+        "text": "s-string"
       },
       "author": {
         "name": "s-string",
-        "url": "s-string",
-        "icon_url": "s-string"
+        "url": "s-string"
       },
       "fields": [
         {

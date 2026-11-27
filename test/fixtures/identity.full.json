@@ -1,0 +1,11 @@
+{
+  "user_id": "10020202-0202-7002-8002-020202020202",
+  "identity_key": "Ag==",
+  "device_list": "Ag==",
+  "device_list_version": 2,
+  "certificates": [
+    "Ag=="
+  ],
+  "active": true,
+  "changed_at": "2026-10-22T10:00:00.123456789Z"
+}

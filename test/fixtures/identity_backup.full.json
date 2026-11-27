@@ -1,0 +1,13 @@
+{
+  "identity_key": "Ag==",
+  "device_list": "Ag==",
+  "encrypted_identity": "Ag==",
+  "wrapped_backup_key": "Ag==",
+  "wrapped_previous_backup_keys": "Ag==",
+  "replaced": [
+    {
+      "identity_id": "11020202-0202-7002-8002-020202020202",
+      "replaced_at": "2026-10-22T10:00:00.123456789Z"
+    }
+  ]
+}

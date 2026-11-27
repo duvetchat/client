@@ -1810,6 +1810,45 @@ void main() {
       expect((list.deviceList, list.version), ('bGlzdA==', 3));
     });
 
+    test('the 426\'s and the 409s\' bodies, as the API\'s own types write them',
+        () async {
+      Map<String, dynamic> body(String name, String variant) => jsonDecode(
+              File('test/fixtures/$name.$variant.json').readAsStringSync())
+          as Map<String, dynamic>;
+      for (final variant in ['full', 'nulls', 'partial']) {
+        final update = body('update_duvet', variant);
+        final required =
+            await refusal(426, update) as DuvetUpdateRequiredException;
+        expect((
+          required.client,
+          required.minimum
+        ), (
+          update['client'],
+          update['minimum']
+        ), reason: variant);
+        // Each 409 by the API's own error.
+        final stale = body('stale_message', variant);
+        final staleRefusal =
+            await refusal(409, stale) as DuvetStaleMessageException;
+        expect((staleRefusal.generation, staleRefusal.epoch),
+            (stale['generation'], stale['epoch']));
+        final taken = body('epoch_taken', variant);
+        final takenRefusal =
+            await refusal(409, taken) as DuvetEpochTakenException;
+        expect((takenRefusal.generation, takenRefusal.epoch),
+            (taken['generation'], taken['epoch']));
+        final identity = body('identity_changed', variant);
+        final identityRefusal =
+            await refusal(409, identity) as DuvetIdentityChangedException;
+        expect(identityRefusal.identityKey, identity['identity_key']);
+        final list = body('device_list_changed', variant);
+        final listRefusal =
+            await refusal(409, list) as DuvetDeviceListChangedException;
+        expect((listRefusal.deviceList, listRefusal.version),
+            (list['device_list'], list['version']));
+      }
+    });
+
     test('a 422 names its code', () async {
       final e = await refusal(
               422, {'error': 'commit refused', 'code': 'removes_last_member'})

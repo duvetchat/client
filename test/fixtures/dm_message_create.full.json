@@ -18,6 +18,7 @@
       "height": 2,
       "created_at": "2026-10-22T10:00:00.123456789Z",
       "deleted_at": "2026-10-22T10:00:00.123456789Z",
+      "kind": 2,
       "url": "s-string"
     }
   ],
@@ -73,31 +74,11 @@
         "color_to": 2
       },
       "footer": {
-        "text": "s-string",
-        "icon_url": "s-string"
-      },
-      "image": {
-        "url": "s-string",
-        "width": 2,
-        "height": 2,
-        "content_type": "s-string"
-      },
-      "thumbnail": {
-        "url": "s-string",
-        "width": 2,
-        "height": 2,
-        "content_type": "s-string"
-      },
-      "video": {
-        "url": "s-string",
-        "width": 2,
-        "height": 2,
-        "content_type": "s-string"
+        "text": "s-string"
       },
       "author": {
         "name": "s-string",
-        "url": "s-string",
-        "icon_url": "s-string"
+        "url": "s-string"
       },
       "fields": [
         {
@@ -195,5 +176,19 @@
     ],
     "started_at": "2026-10-22T10:00:00.123456789Z",
     "ended_at": "2026-10-22T10:00:00.123456789Z"
-  }
+  },
+  "history_share": {
+    "to_user_id": "11020202-0202-7002-8002-020202020202",
+    "range": "s-string"
+  },
+  "ciphertext": "Ag==",
+  "seq": 2,
+  "sent_at": 2,
+  "generation": 2,
+  "epoch": 2,
+  "sender_device_id": "11020202-0202-7002-8002-020202020202",
+  "edited_at": "2026-10-22T10:00:00.123456789Z",
+  "mentions": [
+    "11020202-0202-7002-8002-020202020202"
+  ]
 }

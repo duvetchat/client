@@ -33,6 +33,9 @@
   "last_read_convs": {
     "s-string": "s-string"
   },
+  "last_msg_convs": {
+    "s-string": "s-string"
+  },
   "active_calls": [
     {
       "conversation_id": "s-string",

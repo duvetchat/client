@@ -34,6 +34,36 @@ const _encryptedFields = {
   'history_share',
 };
 
+/// DM_MESSAGE_UPDATE's data as an API before end-to-end encryption sends it:
+/// the edited message, which no fixture holds, as the API with encryption
+/// sends an edit's entry (dm_message_edit_event).
+final _messageBeforeEncryption = <String, dynamic>{
+  'id': '10020202-0202-7002-8002-020202020202',
+  'conversation_id': '11020202-0202-7002-8002-020202020202',
+  'author_id': '11020202-0202-7002-8002-020202020202',
+  'content': 'edited',
+  'type': 0,
+  'created_at': '2026-10-22T10:00:00.123456789Z',
+  'updated_at': '2026-10-22T10:00:00.123456789Z',
+  'sticker_attachment_id': null,
+  'embeds': <Object>[],
+  'user': {
+    'id': '11020202-0202-7002-8002-020202020202',
+    'username': 'ana',
+    'email_verified': false,
+    'alias': null,
+    'avatar': null,
+    'banner': null,
+    'custom': '',
+    'created_at': '2026-10-22T10:00:00.123456789Z',
+    'updated_at': '2026-10-22T10:00:00.123456789Z',
+    'deleted_at': null,
+    'is_bot': false,
+    'flags': 0,
+    'badges': 0,
+  },
+};
+
 /// The fixture's variants. [always] are the keys the server always sets
 /// although its type allows null (e.g. a room message's room_id): the nulls
 /// variant takes them from the full one.
@@ -225,7 +255,19 @@ void main() {
     const author = ['author_id'];
     _parses('message_response', DirectMessage.fromJson, always: author);
     _parses('dm_message_create', DirectMessage.fromJson, always: author);
-    _parses('dm_message_update', DirectMessage.fromJson, always: author);
+    test('DM_MESSAGE_UPDATE\'s message from before end-to-end encryption', () {
+      final edited = DirectMessage.fromJson(_messageBeforeEncryption);
+      expect((edited.content, edited.user?.username, edited.ciphertext),
+          ('edited', 'ana', null));
+      // Its nullable fields null, and no user.
+      final bare = DirectMessage.fromJson({
+        ..._messageBeforeEncryption,
+        'conversation_id': null,
+        'content': null,
+      }..remove('user'));
+      expect(
+          (bare.conversationId, bare.content, bare.user), (null, null, null));
+    });
     // A conversation's thread has a room's thread's shape.
     _parses('thread_message', DirectMessage.fromJson, always: author);
 
@@ -560,7 +602,7 @@ void main() {
       'SPACE_CREATE': ('space_create_event', []),
       'SPACE_UPDATE': ('space', []),
       'SPACE_DELETE': ('space_delete_event', []),
-      'ROOM_CREATE': ('room', []),
+      'ROOM_CREATE': ('room_create_event', []),
       'ROOM_UPDATE': ('room', []),
       'ROOM_DELETE': ('room_delete_event', []),
       'ROOM_OVERWRITE_UPDATE': ('room_overwrite', []),
@@ -604,7 +646,7 @@ void main() {
       'CONVERSATION_MEMBER_ADD': ('conversation_member_add_event', []),
       'CONVERSATION_MEMBER_REMOVE': ('conversation_member_remove_event', []),
       'DM_MESSAGE_CREATE': ('dm_message_create', ['author_id']),
-      'DM_MESSAGE_UPDATE': ('dm_message_update', ['author_id']),
+      'DM_MESSAGE_UPDATE': ('dm_message_edit_event', []),
       'DM_MESSAGE_DELETE': ('dm_message_delete_event', []),
       'DM_REACTION_ADD': ('dm_reaction_add_event', []),
       'DM_REACTION_REMOVE': ('dm_reaction_remove_event', []),
@@ -1253,19 +1295,12 @@ void main() {
     });
 
     test('SPACE_CREATE: the rooms\' read states, none when left out', () {
-      final full = dispatch('SPACE_CREATE', _load('space_create_event', 'full'))
-          as SpaceCreateEvent;
-      final state =
-          full.data.readStates['12020202-0202-7002-8002-020202020202']!;
-      expect((
-        state.unread,
-        state.lastRead,
-        state.lastMsg
-      ), (
-        true,
-        '10020202-0202-7002-8002-020202020202',
-        '11020202-0202-7002-8002-020202020202'
-      ));
+      final json = _load('space_create_event', 'full');
+      final full = dispatch('SPACE_CREATE', json) as SpaceCreateEvent;
+      final room = (json['read_states'] as Map<String, dynamic>).keys.single;
+      final state = full.data.readStates[room]!;
+      expect((state.unread, state.lastRead, state.lastMsg),
+          (true, 's-string', 's-string'));
       // READY's own and a bot's leave them out.
       final nulls =
           dispatch('SPACE_CREATE', _load('space_create_event', 'nulls'))
@@ -1274,11 +1309,11 @@ void main() {
     });
 
     test('ROOM_CREATE: the room\'s read state, null when left out', () {
-      final full =
-          dispatch('ROOM_CREATE', _load('room', 'full')) as RoomCreateEvent;
+      final full = dispatch('ROOM_CREATE', _load('room_create_event', 'full'))
+          as RoomCreateEvent;
       expect(full.data.readState?.unread, isTrue);
-      final nulls =
-          dispatch('ROOM_CREATE', _load('room', 'nulls')) as RoomCreateEvent;
+      final nulls = dispatch('ROOM_CREATE', _load('room_create_event', 'nulls'))
+          as RoomCreateEvent;
       expect(nulls.data.readState, isNull);
     });
 
@@ -1418,11 +1453,12 @@ void main() {
     });
 
     test('SPACE_CREATE: the voice rooms\' states', () {
-      final e = dispatch('SPACE_CREATE', _load('space_create_event', 'full'))
-          as SpaceCreateEvent;
+      final json = _load('space_create_event', 'full');
+      final e = dispatch('SPACE_CREATE', json) as SpaceCreateEvent;
       final state = e.data.voiceStates!.single;
       expect((state.muted, state.camera, state.version), (true, true, 2));
-      expect(state.watching, ['11020202-0202-7002-8002-020202020202']);
+      expect(state.watching,
+          ((json['voice_states'] as List).single as Map)['watching']);
       final nulls =
           dispatch('SPACE_CREATE', _load('space_create_event', 'nulls'))
               as SpaceCreateEvent;
@@ -1648,6 +1684,63 @@ void main() {
 
   // What the API with end-to-end encryption sends, its events and its routes'
   // answers: binary fields in standard base64.
+  // E2eApi's answers, from the API's own types. A field a model reads as
+  // nullable, or as empty when it's missing, is set in the full variant, so a
+  // name the model spells apart from the API's reads as nothing here.
+  group('end-to-end encryption\'s answers', () {
+    void wholeEntry(MlsEntry e) {
+      expect([
+        e.data,
+        e.messageId,
+        e.senderUser,
+        e.senderDevice,
+        e.statement,
+        e.replyTo
+      ], everyElement(isNotNull));
+      expect((e.deleted, e.mentions.length), (true, 1));
+    }
+
+    _parses('e2e_config', E2eConfig.fromJson, check: (c, variant) {
+      final json = _load('e2e_config', variant);
+      expect(c.externalSender, json['external_sender']);
+      expect(c.minClients, json['min_clients']);
+      if (variant == 'full') {
+        expect(c.cutoverAt, DateTime.utc(2026, 10, 22, 10, 0, 0, 123, 456));
+        expect(c.minClients, isNotEmpty);
+      }
+    });
+    _parses('device', Device.fromJson,
+        check: (d, variant) => expect(d.current, variant == 'full'));
+    _parses('identity', Identity.fromJson, check: (i, variant) {
+      if (variant == 'full') expect(i.certificates, hasLength(1));
+    });
+    _parses('identity_backup', IdentityBackup.fromJson, check: (b, variant) {
+      if (variant != 'full') return;
+      expect(b.wrappedPreviousBackupKeys, isNotNull);
+      final replaced = b.replaced.single;
+      expect(replaced.identityId, isNotEmpty);
+      expect(
+          replaced.replacedAt, DateTime.utc(2026, 10, 22, 10, 0, 0, 123, 456));
+    });
+    _parses('mls_queue_page', QueuePage.fromJson, check: (p, variant) {
+      if (variant == 'full') wholeEntry(p.entries.single);
+    });
+    _parses('member_added', MemberAdded.fromJson, check: (m, variant) {
+      if (variant != 'full') return;
+      expect([m.user, m.statusId, m.clientStatus, m.commit.welcomeSeq],
+          everyElement(isNotNull));
+    });
+    _parses('edited_message', MessageEdited.fromJson, check: (m, variant) {
+      if (variant == 'full') wholeEntry(m.entry);
+    });
+    _parses('deleted_message', MessageDeleted.fromJson, check: (m, variant) {
+      if (variant == 'full') wholeEntry(m.entry);
+    });
+    _parses('inbox_message_row', InboxMessage.fromJson);
+    _parses('backup_segment_row', BackupSegment.fromJson);
+    _parses('decrypt_failure_row', DecryptFailureCount.fromJson);
+  });
+
   group('end-to-end encryption', () {
     GatewayEventPayload? dispatch(String type, Map<String, dynamic> data) =>
         GatewayEnvelope.fromJson({
@@ -1822,10 +1915,9 @@ void main() {
       ));
       // An API from before end-to-end encryption sends the message, with no
       // entry.
-      final message = _load('dm_message_update', 'full')..remove('entry');
-      final before =
-          dispatch('DM_MESSAGE_UPDATE', message) as DMMessageUpdatedEvent;
-      expect(before.data.content, message['content']);
+      final before = dispatch('DM_MESSAGE_UPDATE', _messageBeforeEncryption)
+          as DMMessageUpdatedEvent;
+      expect(before.data.content, 'edited');
     });
 
     test(
@@ -2028,8 +2120,7 @@ void main() {
             'DM_MESSAGE_UPDATE', _load('dm_message_edit_event', 'full'))!,
       };
       // A message from before end-to-end encryption isn't an edit's entry.
-      final before = dispatch('DM_MESSAGE_UPDATE',
-          _load('dm_message_update', 'full')..remove('entry'))!;
+      final before = dispatch('DM_MESSAGE_UPDATE', _messageBeforeEncryption)!;
       final updates = events.onDMUpdate.toList();
       sent.values.forEach(events.add);
       events.add(before);

@@ -19,5 +19,12 @@
   "flags": 2,
   "components": [],
   "interaction_metadata": null,
-  "ref_mention_author": false
+  "ref_mention_author": false,
+  "ciphertext": "",
+  "seq": null,
+  "generation": null,
+  "epoch": null,
+  "sender_device_id": null,
+  "nonce": null,
+  "edited_at": null
 }

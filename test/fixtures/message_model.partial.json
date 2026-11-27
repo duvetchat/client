@@ -34,5 +34,16 @@
     "participants": [],
     "started_at": "2026-10-22T10:00:00.123456789Z",
     "ended_at": "2026-10-22T10:00:00.123456789Z"
+  },
+  "ciphertext": "",
+  "seq": null,
+  "generation": null,
+  "epoch": null,
+  "sender_device_id": null,
+  "nonce": null,
+  "edited_at": null,
+  "history_share": {
+    "to_user_id": "11020202-0202-7002-8002-020202020202",
+    "range": "s-string"
   }
 }

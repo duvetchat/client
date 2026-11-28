@@ -1,4 +1,11 @@
 {
   "id": "s-string",
-  "conversation_id": "s-string"
+  "conversation_id": "s-string",
+  "entry": {
+    "seq": 2,
+    "kind": "s-string",
+    "sent_at": 2,
+    "generation": 2,
+    "epoch": 2
+  }
 }

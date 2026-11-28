@@ -79,6 +79,14 @@ mixin RestMethods {
   ApiRouter get router;
   Map<String, String> get authHeaders;
 
+  /// What the app is, `<platform>/<major.minor.patch>` (`android/1.1.0`),
+  /// which every request sends as `X-Duvet-Client` and the gateway's identify
+  /// as `client`: the API takes end-to-end encryption's routes, and a
+  /// conversation's, only from a client whose version has it (a 426,
+  /// [DuvetUpdateRequiredException], otherwise). None, as by default, sends
+  /// neither.
+  String? get duvetClient => null;
+
   /// Renews the session's tokens after a request got a 401, and answers
   /// whether it did: the request is then sent once more.
   Future<bool> renewSession() async => false;
@@ -118,9 +126,18 @@ mixin RestMethods {
     await request('POST', '/api/auth/verify/send', 'send verification email');
   }
 
-  Future<void> resetPassword(String token, String password) async {
+  /// Sets a new password with the token its email gave, which ends every
+  /// session of the user. [removeDevices] removes every device of theirs too,
+  /// with what they hold for end-to-end encryption: for whoever lost them.
+  Future<void> resetPassword(String token, String password,
+      {bool removeDevices = false}) async {
     await request('POST', '/api/auth/reset-password', 'reset password',
-        json: {'token': token, 'password': password}, renew: false);
+        json: {
+          'token': token,
+          'password': password,
+          if (removeDevices) 'remove_devices': true,
+        },
+        renew: false);
   }
 
   Future<void> forgotPassword(String email) async {
@@ -1094,24 +1111,9 @@ mixin RestMethods {
     return Conversation.fromJson(_decodeMap(response));
   }
 
-  Future<ConversationMember> addConversationMember(
-      String conversationId, String userId) async {
-    final response = await request(
-        'POST',
-        '/api/users/@me/conversations/$conversationId/members',
-        'add conversation member',
-        json: {'user_id': userId});
-    return ConversationMember.fromJson(_decodeMap(response));
-  }
-
-  Future<void> removeConversationMember(
-      String conversationId, String userId) async {
-    await request(
-        'DELETE',
-        '/api/users/@me/conversations/$conversationId/members/$userId',
-        'remove conversation member');
-  }
-
+  /// Leaves without a statement, which the API with end-to-end encryption
+  /// takes only where the conversation has no group yet. Where it has one,
+  /// the user leaves with their statement: `E2eApi.leave`.
   Future<void> leaveConversation(String conversationId) async {
     await request(
         'DELETE',
@@ -1178,6 +1180,10 @@ mixin RestMethods {
         'unpin conversation message');
   }
 
+  /// Only a search without words: the API with end-to-end encryption can't
+  /// read a conversation's text, which the device searches, and refuses a
+  /// [MessageSearch.query] (a 400). In a conversation, `has` takes `file` and
+  /// `sticker`.
   Future<MessageSearchResponse<DirectMessage>> searchConversationMessages(
       String conversationId, MessageSearch search) async {
     final response = await request(
@@ -1199,54 +1205,6 @@ mixin RestMethods {
     return _decodeList(response, DirectMessage.fromJson);
   }
 
-  /// Sends a message to the conversation. With [files], it goes as a
-  /// multipart form, which carries no [embeds] or sticker. [allowedMentions],
-  /// [onProgress] and [abortTrigger] work as [sendMessage]'s.
-  Future<DirectMessage> sendDirectMessage(
-    String conversationId,
-    String content, {
-    String? nonce,
-    MessageReference? messageReference,
-    AllowedMentions? allowedMentions,
-    List<File>? files,
-    List<Embed>? embeds,
-    String? stickerAttachmentId,
-    void Function(int sent, int total)? onProgress,
-    Future<void>? abortTrigger,
-  }) async {
-    final response = await _sendMessage(
-        '/api/users/@me/conversations/$conversationId/messages', content,
-        nonce: nonce,
-        messageReference: messageReference,
-        allowedMentions: allowedMentions,
-        files: files,
-        embeds: embeds,
-        stickerAttachmentId: stickerAttachmentId,
-        onProgress: onProgress,
-        abortTrigger: abortTrigger);
-    return DirectMessage.fromJson(_decodeMap(response));
-  }
-
-  /// Sends a voice message to the conversation: [audio] is a recording in
-  /// [format], as [sendVoiceNote] takes it.
-  Future<DirectMessage> sendDMVoiceNote(String conversationId, List<int> audio,
-      {String? nonce, String format = 'webm'}) async {
-    final response = await _sendVoiceNote(
-        '/api/users/@me/conversations/$conversationId/messages', audio,
-        nonce: nonce, format: format);
-    return DirectMessage.fromJson(_decodeMap(response));
-  }
-
-  Future<DirectMessage> updateDirectMessage(
-      String conversationId, String messageId, String content) async {
-    final response = await request(
-        'PATCH',
-        '/api/users/@me/conversations/$conversationId/messages/$messageId',
-        'update direct message',
-        json: {'content': content});
-    return DirectMessage.fromJson(_decodeMap(response));
-  }
-
   /// Tells the conversation the user is typing.
   Future<void> sendConversationTyping(String conversationId) async {
     await request('POST', '/api/users/@me/conversations/$conversationId/typing',
@@ -1261,6 +1219,10 @@ mixin RestMethods {
         'send conversation recording');
   }
 
+  /// Deletes a notice: a pin's, a call's or a history share's (a group's owner,
+  /// and in a DM either member), from a session bound to a listed device. The
+  /// API with end-to-end encryption deletes an encrypted message only with its
+  /// tombstone: `E2eApi.deleteMessage`.
   Future<void> deleteDirectMessage(
       String conversationId, String messageId) async {
     await request(
@@ -1708,11 +1670,13 @@ mixin RestMethods {
   // -------------------------------------------------------------------------
 
   /// Sends a request to the API with the session's headers: [json] as its
-  /// body, or [fields] and [files] as a multipart form, and throws a
-  /// [DuvetApiException] unless it succeeds. Unless [renew] is false, a 401
-  /// renews the session and sends it once more, as does a 401 to a request
-  /// sent before a renewal that has finished since. [action] names it in
-  /// errors.
+  /// body, [bytes] as it is (`application/octet-stream`), or [fields] and
+  /// [files] as a multipart form, where a list value repeats its field, and
+  /// throws a [DuvetApiException] unless it succeeds: the refusals end-to-end
+  /// encryption tells apart as its subtypes ([DuvetUpdateRequiredException]
+  /// and the like). Unless [renew] is false, a 401 renews the session and
+  /// sends it once more, as does a 401 to a request sent before a renewal
+  /// that has finished since. [action] names it in errors.
   ///
   /// It fails with a [TimeoutException] when [timeout] ([requestTimeout]
   /// unless given) passes without progress. [onProgress] gets the bytes of the
@@ -1726,7 +1690,8 @@ mixin RestMethods {
     Map<String, dynamic>? query,
     bool root = false,
     Object? json,
-    Map<String, String>? fields,
+    List<int>? bytes,
+    Map<String, Object>? fields,
     List<FilePart>? files,
     bool renew = true,
     Duration? timeout,
@@ -1736,18 +1701,35 @@ mixin RestMethods {
     final url = router.urlFromPath(path, query: query, root: root);
 
     http.BaseRequest build() {
+      final headers = {
+        ...authHeaders,
+        if (duvetClient case final name?) 'X-Duvet-Client': name,
+      };
       if (fields != null || files != null) {
+        final form = fields ?? const <String, Object>{};
         return http.MultipartRequest(method, url)
-          ..headers.addAll(authHeaders)
-          ..fields.addAll(fields ?? const {})
+          ..headers.addAll(headers)
+          ..fields.addAll({
+            for (final MapEntry(:key, :value) in form.entries)
+              if (value is! Iterable) key: '$value',
+          })
+          // A value repeated: parts without a file name, which the API reads
+          // as values.
           ..files.addAll([
+            for (final MapEntry(:key, :value) in form.entries)
+              if (value is Iterable)
+                for (final one in value)
+                  http.MultipartFile.fromString(key, '$one'),
             for (final f in files ?? const <FilePart>[])
               http.MultipartFile.fromBytes(f.field, f.bytes,
                   filename: f.filename, contentType: _mediaTypeOf(f.filename)),
           ]);
       }
-      final request = http.Request(method, url)..headers.addAll(authHeaders);
-      if (json != null) {
+      final request = http.Request(method, url)..headers.addAll(headers);
+      if (bytes != null) {
+        request.headers['Content-Type'] = 'application/octet-stream';
+        request.bodyBytes = bytes;
+      } else if (json != null) {
         request.headers['Content-Type'] = 'application/json';
         request.body = jsonEncode(json);
       }
@@ -1857,17 +1839,125 @@ mixin RestMethods {
         action: action,
         statusCode: response.statusCode,
         body: response.body,
+        retryAfter: retryAfterOf(response.headers),
       );
     }
 
-    throw DuvetApiException(
-      action: action,
-      statusCode: response.statusCode,
-      reasonPhrase: response.reasonPhrase,
-      body: response.body,
-    );
+    throw _refusal(response, action);
   }
 }
+
+/// The refusals an end-to-end encryption engine tells apart, by their status
+/// and the API's error, with what each carries; any other a
+/// [DuvetApiException], as before.
+DuvetApiException _refusal(http.Response response, String action) {
+  final (status, reason, body) =
+      (response.statusCode, response.reasonPhrase, response.body);
+  final retryAfter = retryAfterOf(response.headers);
+  // A body without what its error carries reads as any other.
+  return switch ((status, _jsonObject(body))) {
+    (426, final j) => DuvetUpdateRequiredException(
+        action: action,
+        statusCode: status,
+        reasonPhrase: reason,
+        body: body,
+        retryAfter: retryAfter,
+        client: _string(j?['client']),
+        minimum: _string(j?['minimum'])),
+    (503, {'error': 'encrypted conversations are paused'}) =>
+      DuvetPausedException(
+          action: action,
+          statusCode: status,
+          reasonPhrase: reason,
+          body: body,
+          retryAfter: retryAfter ?? const Duration(seconds: 60)),
+    (
+      409,
+      {
+        'error': 'stale message',
+        'generation': final int generation,
+        'epoch': final int epoch
+      }
+    ) =>
+      DuvetStaleMessageException(
+          action: action,
+          statusCode: status,
+          reasonPhrase: reason,
+          body: body,
+          retryAfter: retryAfter,
+          generation: generation,
+          epoch: epoch),
+    (
+      409,
+      {
+        'error': 'another commit took this epoch',
+        'generation': final int generation,
+        'epoch': final int epoch
+      }
+    ) =>
+      DuvetEpochTakenException(
+          action: action,
+          statusCode: status,
+          reasonPhrase: reason,
+          body: body,
+          retryAfter: retryAfter,
+          generation: generation,
+          epoch: epoch),
+    (
+      409,
+      {'error': 'identity changed', 'identity_key': final String? identityKey}
+    ) =>
+      DuvetIdentityChangedException(
+          action: action,
+          statusCode: status,
+          reasonPhrase: reason,
+          body: body,
+          retryAfter: retryAfter,
+          identityKey: identityKey),
+    (
+      409,
+      {
+        'error': 'device list changed',
+        'device_list': final String deviceList,
+        'version': final int version
+      }
+    ) =>
+      DuvetDeviceListChangedException(
+          action: action,
+          statusCode: status,
+          reasonPhrase: reason,
+          body: body,
+          retryAfter: retryAfter,
+          deviceList: deviceList,
+          version: version),
+    (422, {'error': 'commit refused', 'code': final String code}) =>
+      DuvetCommitRefusedException(
+          action: action,
+          statusCode: status,
+          reasonPhrase: reason,
+          body: body,
+          retryAfter: retryAfter,
+          code: code),
+    _ => DuvetApiException(
+        action: action,
+        statusCode: status,
+        reasonPhrase: reason,
+        body: body,
+        retryAfter: retryAfter),
+  };
+}
+
+/// [body] as a JSON object, or null when it isn't one.
+Map<String, dynamic>? _jsonObject(String body) {
+  try {
+    final decoded = jsonDecode(body);
+    return decoded is Map<String, dynamic> ? decoded : null;
+  } on FormatException {
+    return null;
+  }
+}
+
+String? _string(Object? value) => value is String ? value : null;
 
 /// Which of the user's profile images [RestMethods.uploadProfileImage] sets.
 enum ProfileImageKind { avatar, banner }

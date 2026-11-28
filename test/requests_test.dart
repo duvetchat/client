@@ -75,7 +75,7 @@ class Sent {
 
 /// A client whose server answers [reply] (200, JSON) and records what it got.
 ({RestClient api, List<Sent> sent}) _client(Object? Function(Sent) reply,
-    {String token = 'tok', String sessionToken = 'sess'}) {
+    {String token = 'tok', String sessionToken = 'sess', String? duvetClient}) {
   final sent = <Sent>[];
   final mock = MockClient((request) async {
     final s = Sent(request);
@@ -86,10 +86,42 @@ class Sent {
         headers: {'content-type': 'application/json'});
   });
   return (
-    api: RestClient(mock, token: token, sessionToken: sessionToken),
+    api: RestClient(mock,
+        token: token, sessionToken: sessionToken, duvetClient: duvetClient),
     sent: sent
   );
 }
+
+/// The parts of [s]'s multipart body, in order: each one's field, its file
+/// name (null for a value) and its content.
+List<({String name, String? filename, String content})> _parts(Sent s) {
+  final boundary = s.contentType!.split('boundary=').last;
+  final body = latin1.decode(s.request.bodyBytes);
+  return [
+    // Each part starts a line after its boundary; the last boundary ends in --.
+    for (final raw in body.split('--$boundary'))
+      if (raw.startsWith('\r\n'))
+        (() {
+          final end = raw.indexOf('\r\n\r\n');
+          final name = RegExp(r'name="([^"]*)"(?:; filename="([^"]*)")?')
+              .firstMatch(raw.substring(0, end))!;
+          return (
+            name: name[1]!,
+            filename: name[2],
+            content: raw.substring(end + 4, raw.length - 2),
+          );
+        })(),
+  ];
+}
+
+/// The headers that carry the app's session or name it, and a cookie, which a
+/// signed URL never gets.
+const _appHeaders = [
+  'authorization',
+  'x-session-token',
+  'x-duvet-client',
+  'cookie'
+];
 
 void main() {
   group('headers', () {
@@ -204,6 +236,19 @@ void main() {
       expect(c.api.sessionToken, isEmpty);
     });
 
+    test('a rejected refresh says how long the API asks to wait', () async {
+      for (final status in [401, 403]) {
+        final c = _client(
+            (_) => http.Response('', status, headers: {'retry-after': '4'}));
+        await expectLater(
+            c.api.refreshSession(),
+            throwsA(isA<DuvetAuthException>()
+                .having((e) => e.statusCode, 'statusCode', status)
+                .having((e) => e.retryAfter, 'retryAfter',
+                    const Duration(seconds: 4))));
+      }
+    });
+
     test('a rate-limited refresh waits and tries again', () async {
       var refreshes = 0;
       final c = _client((s) {
@@ -219,6 +264,22 @@ void main() {
       expect(await c.api.getFriends(), isEmpty);
       expect(refreshes, 2);
       expect(c.api.sessionToken, 'sess', reason: 'kept when none comes back');
+    });
+
+    test('a refresh still limited after its tries says the API\'s wait',
+        () async {
+      var refreshes = 0;
+      final c = _client((s) => s.path == '/api/auth/refresh'
+          ? http.Response('', 429,
+              headers: {'retry-after': ++refreshes > 3 ? '7' : '0'})
+          : http.Response('', 401));
+      await expectLater(
+          c.api.refreshSession(),
+          throwsA(isA<DuvetApiException>()
+              .having((e) => e.statusCode, 'statusCode', 429)
+              .having((e) => e.retryAfter, 'retryAfter',
+                  const Duration(seconds: 7))));
+      expect(refreshes, 4);
     });
 
     test('without a session token a 401 just throws', () async {
@@ -344,18 +405,14 @@ void main() {
           MessageReference(type: MessageReferenceType.reply, messageId: 'm0');
       const silent = AllowedMentions(repliedUser: false);
 
-      final c = _client((s) => s.path.startsWith('/api/rooms')
-          ? _message
-          : {..._message, 'conversation_id': 'c1'});
+      final c = _client((_) => _message);
       await c.api.sendMessage('r1', 'hi',
           messageReference: reply, allowedMentions: silent);
-      await c.api.sendDirectMessage('c1', 'hi',
+      await c.api.sendMessage('r1', 'hi',
           messageReference: reply,
           allowedMentions: const AllowedMentions(repliedUser: true));
       // In a form, a JSON string, as message_reference.
       await c.api.sendMessage('r1', 'look',
-          messageReference: reply, allowedMentions: silent, files: [file]);
-      await c.api.sendDirectMessage('c1', 'look',
           messageReference: reply, allowedMentions: silent, files: [file]);
 
       expect(c.sent[0].json, {
@@ -363,13 +420,9 @@ void main() {
         'message_reference': {'type': 0, 'message_id': 'm0'},
         'allowed_mentions': {'replied_user': false},
       });
-      expect(c.sent[1].path, '/api/users/@me/conversations/c1/messages');
       expect(c.sent[1].json['allowed_mentions'], {'replied_user': true});
-      for (final s in c.sent.sublist(2)) {
-        expect(s.request.body,
-            contains('name="allowed_mentions"\r\n\r\n{"replied_user":false}'));
-      }
-      expect(c.sent[3].path, '/api/users/@me/conversations/c1/messages');
+      expect(c.sent[2].request.body,
+          contains('name="allowed_mentions"\r\n\r\n{"replied_user":false}'));
     });
 
     test('sendVoiceNote sends a WebM file of type 1', () async {
@@ -383,15 +436,12 @@ void main() {
     });
 
     test('voice notes name their format: Ogg/Opus or AAC in MP4', () async {
-      final c = _client((s) => s.path.startsWith('/api/rooms')
-          ? {..._message, 'type': 1}
-          : {..._message, 'type': 1, 'conversation_id': 'c1'});
+      final c = _client((_) => {..._message, 'type': 1});
       await c.api.sendVoiceNote('r1', [1], format: 'ogg');
-      final dm = await c.api.sendDMVoiceNote('c1', [1], format: 'm4a');
-      expect(dm.type, MessageType.voice);
+      final m4a = await c.api.sendVoiceNote('r1', [1], format: 'm4a');
+      expect(m4a.type, MessageType.voice);
       expect(c.sent[0].request.body, contains('filename="voice-note.ogg"'));
       expect(c.sent[0].request.body, contains('content-type: audio/ogg'));
-      expect(c.sent[1].path, '/api/users/@me/conversations/c1/messages');
       expect(c.sent[1].request.body, contains('name="type"\r\n\r\n1'));
       expect(c.sent[1].request.body, contains('filename="voice-note.m4a"'));
       expect(c.sent[1].request.body, contains('content-type: audio/mp4'));
@@ -410,9 +460,9 @@ void main() {
       final file = File('${dir.path}/big.bin')
         ..writeAsBytesSync(List.filled(300 * 1024, 7));
 
-      final c = _client((_) => {..._message, 'conversation_id': 'c1'});
+      final c = _client((_) => _message);
       final progress = <(int, int)>[];
-      await c.api.sendDirectMessage('c1', 'look',
+      await c.api.sendMessage('r1', 'look',
           files: [file],
           onProgress: (sent, total) => progress.add((sent, total)));
       final total = c.sent.single.request.bodyBytes.length;
@@ -1070,8 +1120,6 @@ void main() {
       final c = _client((s) => s.method == 'GET' ? [dm] : dm);
       await c.api.getDirectMessages('c1', before: 'd0');
       await c.api.getDirectMessagesAfter('c1', 'd0');
-      await c.api.sendDirectMessage('c1', 'yo', nonce: 'n');
-      await c.api.updateDirectMessage('c1', 'd1', 'edit');
       expect(c.sent[0].path, '/api/users/@me/conversations/c1/messages');
       expect(c.sent[0].query, {
         'count': ['100'],
@@ -1082,8 +1130,6 @@ void main() {
         'count': ['100'],
         'after': ['d0'],
       });
-      expect(c.sent[2].json, {'content': 'yo', 'nonce': 'n'});
-      expect(c.sent[3].json, {'content': 'edit'});
     });
 
     test('a message\'s thread', () async {
@@ -1100,18 +1146,78 @@ void main() {
 
     test('members, pins, typing', () async {
       final c = _client((_) => null);
-      await c.api.removeConversationMember('c1', 'u2');
       await c.api.leaveConversation('c1');
       await c.api.pinConversationMessage('c1', 'd1');
       await c.api.sendConversationTyping('c1');
       await c.api.sendConversationRecording('c1');
       expect(c.sent.map((s) => '${s.method} ${s.path}'), [
-        'DELETE /api/users/@me/conversations/c1/members/u2',
         'DELETE /api/users/@me/conversations/c1/members/@me',
         'PUT /api/users/@me/conversations/c1/pins/d1',
         'POST /api/users/@me/conversations/c1/typing',
         'POST /api/users/@me/conversations/c1/recording',
       ]);
+    });
+
+    test(
+        'no call sends a conversation\'s text or a file in the clear, or '
+        'changes its members without a commit', () {
+      // Each member of a class, mixin or extension in lib/, from its first
+      // line (two spaces in, as dart format sets it) to the next one's,
+      // without its comments.
+      final members = [
+        for (final file in Directory('lib').listSync(recursive: true))
+          if (file is File && file.path.endsWith('.dart'))
+            for (final member in file
+                .readAsStringSync()
+                .replaceAll('\r\n', '\n')
+                .split(RegExp(r'\n(?=  [A-Za-z_@])')))
+              member
+                  .split('\n')
+                  .where((line) => !line.trimLeft().startsWith('//'))
+                  .join('\n'),
+      ];
+      String name(String member) =>
+          RegExp(r'(\w+)\(').firstMatch(member)?[1] ?? member;
+      // A message's text, or a form's file whose fields aren't an
+      // EncryptedMessage's (whose ciphertext seals the message and names its
+      // sealed files).
+      bool plain(String member) =>
+          member.contains("'content'") ||
+          (member.contains('files:') && !member.contains('EncryptedMessage'));
+      // The private helpers that post either, to a path their callers give.
+      final helpers = {
+        for (final member in members)
+          if (plain(member))
+            if (RegExp(r'^  [^(\n]*?\b(_\w+)\(').firstMatch(member)
+                case final helper?)
+              helper[1]!,
+      };
+      final messages = RegExp(r'conversations/\$\{?[\w.]+\}?/messages');
+      // A member's addition or removal, not leaving (@me).
+      final memberChanges =
+          RegExp(r'conversations/\$\{?[\w.]+\}?/members(?!/@me)');
+      final toMessages = [
+        for (final member in members)
+          if (messages.hasMatch(member)) member
+      ];
+      final toMembers = [
+        for (final member in members)
+          if (memberChanges.hasMatch(member)) member
+      ];
+
+      expect([
+        for (final member in toMessages)
+          if (plain(member) || helpers.any((h) => member.contains('$h(')))
+            name(member),
+        for (final member in toMembers)
+          if (!member.contains('Commit ')) name(member),
+      ], isEmpty);
+      // It reads both kinds of call: the history's and end-to-end
+      // encryption's.
+      expect(helpers, containsAll(['_sendMessage', '_sendVoiceNote']));
+      expect(toMessages.map(name),
+          containsAll(['getDirectMessages', 'sendMessage', 'editMessage']));
+      expect(toMembers.map(name), containsAll(['addMember', 'removeMember']));
     });
   });
 
@@ -1517,6 +1623,1287 @@ void main() {
     test('a fixture\'s options go back as they came', () {
       final parsed = ApplicationCommand.fromJson(command);
       expect([for (final o in parsed.options) o.toJson()], command['options']);
+    });
+  });
+
+  // What the app is, as X-Duvet-Client and the identify's client name it: the
+  // API takes encryption's routes and a conversation's only from a client
+  // that has it.
+  group('the client\'s name', () {
+    test('every request sends X-Duvet-Client, renewals included', () async {
+      final c = _client((s) {
+        if (s.path == '/api/auth/refresh') return {'token': 'new'};
+        if (s.path == '/api/auth/login') {
+          return {'token': 'A', 'session_token': 'S'};
+        }
+        return s.request.headers['Authorization'] == 'Bearer new'
+            ? <Object>[]
+            : http.Response('', 401);
+      }, duvetClient: 'android/1.1.0');
+      await c.api.getFriends();
+      await c.api.logIn('a@b.c', 'pw');
+      expect(c.sent.map((s) => s.path), [
+        '/api/users/@me/friends',
+        '/api/auth/refresh',
+        '/api/users/@me/friends',
+        '/api/auth/login',
+      ]);
+      for (final s in c.sent) {
+        expect(s.request.headers['X-Duvet-Client'], 'android/1.1.0',
+            reason: s.path);
+      }
+    });
+
+    test('a client that names none sends none', () async {
+      final c = _client((s) => s.path == '/api/auth/refresh'
+          ? {'token': 'new'}
+          : s.request.headers['Authorization'] == 'Bearer new'
+              ? <Object>[]
+              : http.Response('', 401));
+      await c.api.getFriends();
+      for (final s in c.sent) {
+        expect(s.request.headers.containsKey('X-Duvet-Client'), isFalse,
+            reason: s.path);
+      }
+    });
+
+    test('logIn answers the session\'s device challenge', () async {
+      final c = _client(
+          (_) => {
+                'token': 'A',
+                'session_token': 'S',
+                'device_challenge': 'Y2hhbGxlbmdl',
+              },
+          token: '',
+          sessionToken: '');
+      final signIn = await c.api.logIn('a@b.c', 'pw');
+      expect(signIn.deviceChallenge, 'Y2hhbGxlbmdl');
+      // None from an API before end-to-end encryption.
+      final older = _client((_) => {'token': 'A', 'session_token': 'S'},
+          token: '', sessionToken: '');
+      expect((await older.api.logIn('a@b.c', 'pw')).deviceChallenge, isNull);
+    });
+
+    test('resetPassword removes the devices only when asked', () async {
+      final c = _client((_) => null);
+      await c.api.resetPassword('t', 'pw');
+      await c.api.resetPassword('t', 'pw', removeDevices: true);
+      expect(c.sent[0].json, {'token': 't', 'password': 'pw'});
+      expect(c.sent[1].json,
+          {'token': 't', 'password': 'pw', 'remove_devices': true});
+    });
+  });
+
+  // The API's refusals that an encryption engine tells apart, each a
+  // DuvetApiException with its status and body, as every other is.
+  group('refusals', () {
+    Future<Object> refusal(int status, Object body,
+        {Map<String, String> headers = const {}}) async {
+      final text = body is String ? body : jsonEncode(body);
+      final c = _client((_) => http.Response(text, status, headers: headers),
+          duvetClient: 'android/1.0.0');
+      try {
+        await E2eApi(c.api).devices();
+      } catch (e) {
+        expect(e, isA<DuvetApiException>());
+        final api = e as DuvetApiException;
+        expect((api.statusCode, api.body), (status, text));
+        return e;
+      }
+      fail('no refusal');
+    }
+
+    test('a 426 says the client and its platform\'s lowest version', () async {
+      final e = await refusal(426, {
+        'error': 'update Duvet',
+        'client': 'android/1.0.0',
+        'minimum': '1.1.0',
+      }) as DuvetUpdateRequiredException;
+      expect((e.client, e.minimum), ('android/1.0.0', '1.1.0'));
+      // A client the API couldn't read, of a platform with no encryption yet.
+      final none = await refusal(
+              426, {'error': 'update Duvet', 'client': null, 'minimum': null})
+          as DuvetUpdateRequiredException;
+      expect((none.client, none.minimum), (null, null));
+    });
+
+    test('a 503 while encryption is paused says when to try again', () async {
+      const paused = {'error': 'encrypted conversations are paused'};
+      final e = await refusal(503, paused, headers: {'retry-after': '60'})
+          as DuvetPausedException;
+      expect(e.retryAfter, const Duration(seconds: 60));
+      final soon = await refusal(503, paused, headers: {'retry-after': '5'})
+          as DuvetPausedException;
+      expect(soon.retryAfter, const Duration(seconds: 5));
+      // The API's own minute, when the header doesn't read.
+      final unsaid = await refusal(503, paused) as DuvetPausedException;
+      expect(unsaid.retryAfter, const Duration(seconds: 60));
+    });
+
+    test('any other 503 reads as before', () async {
+      final e = await refusal(
+          503, {'error': 'too many writes are waiting for their conversations'},
+          headers: {'retry-after': '1'});
+      expect(e.runtimeType, DuvetApiException);
+      expect((e as DuvetApiException).retryAfter, const Duration(seconds: 1));
+    });
+
+    test('a refusal says how long the API asks to wait, when it does',
+        () async {
+      const limited = {'error': 'too many requests'};
+      final e = await refusal(429, limited, headers: {'retry-after': '37'})
+          as DuvetApiException;
+      expect(e.retryAfter, const Duration(seconds: 37));
+      // A refusal the engine tells apart carries it too.
+      final stale = await refusal(
+          409, {'error': 'stale message', 'generation': 1, 'epoch': 9},
+          headers: {'retry-after': '2'}) as DuvetStaleMessageException;
+      expect(stale.retryAfter, const Duration(seconds: 2));
+      // None said, or none that reads as seconds: null.
+      for (final headers in [
+        <String, String>{},
+        {'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT'},
+        {'retry-after': '-1'},
+        {'retry-after': 'soon'},
+      ]) {
+        final unsaid =
+            await refusal(429, limited, headers: headers) as DuvetApiException;
+        expect(unsaid.retryAfter, isNull, reason: '$headers');
+      }
+    });
+
+    test('a 401 and a 403 say it too', () async {
+      for (final status in [401, 403]) {
+        final e = await refusal(status, {'error': 'not now'},
+            headers: {'retry-after': '9'});
+        expect(e, isA<DuvetAuthException>(), reason: '$status');
+        expect((e as DuvetAuthException).retryAfter, const Duration(seconds: 9),
+            reason: '$status');
+      }
+    });
+
+    test('the 409s the engine tells apart, with what each carries', () async {
+      final stale = await refusal(
+              409, {'error': 'stale message', 'generation': 1, 'epoch': 9})
+          as DuvetStaleMessageException;
+      expect((stale.generation, stale.epoch), (1, 9));
+      final taken = await refusal(409, {
+        'error': 'another commit took this epoch',
+        'generation': 0,
+        'epoch': 4
+      }) as DuvetEpochTakenException;
+      expect((taken.generation, taken.epoch), (0, 4));
+      final identity = await refusal(
+              409, {'error': 'identity changed', 'identity_key': 'a2V5'})
+          as DuvetIdentityChangedException;
+      expect(identity.identityKey, 'a2V5');
+      // A user who has none any more.
+      final gone = await refusal(
+              409, {'error': 'identity changed', 'identity_key': null})
+          as DuvetIdentityChangedException;
+      expect(gone.identityKey, isNull);
+      final list = await refusal(409, {
+        'error': 'device list changed',
+        'device_list': 'bGlzdA==',
+        'version': 3
+      }) as DuvetDeviceListChangedException;
+      expect((list.deviceList, list.version), ('bGlzdA==', 3));
+    });
+
+    test('the 426\'s and the 409s\' bodies, as the API\'s own types write them',
+        () async {
+      Map<String, dynamic> body(String name, String variant) => jsonDecode(
+              File('test/fixtures/$name.$variant.json').readAsStringSync())
+          as Map<String, dynamic>;
+      for (final variant in ['full', 'nulls', 'partial']) {
+        final update = body('update_duvet', variant);
+        final required =
+            await refusal(426, update) as DuvetUpdateRequiredException;
+        expect((
+          required.client,
+          required.minimum
+        ), (
+          update['client'],
+          update['minimum']
+        ), reason: variant);
+        // Each 409 by the API's own error.
+        final stale = body('stale_message', variant);
+        final staleRefusal =
+            await refusal(409, stale) as DuvetStaleMessageException;
+        expect((staleRefusal.generation, staleRefusal.epoch),
+            (stale['generation'], stale['epoch']));
+        final taken = body('epoch_taken', variant);
+        final takenRefusal =
+            await refusal(409, taken) as DuvetEpochTakenException;
+        expect((takenRefusal.generation, takenRefusal.epoch),
+            (taken['generation'], taken['epoch']));
+        final identity = body('identity_changed', variant);
+        final identityRefusal =
+            await refusal(409, identity) as DuvetIdentityChangedException;
+        expect(identityRefusal.identityKey, identity['identity_key']);
+        final list = body('device_list_changed', variant);
+        final listRefusal =
+            await refusal(409, list) as DuvetDeviceListChangedException;
+        expect((listRefusal.deviceList, listRefusal.version),
+            (list['device_list'], list['version']));
+      }
+    });
+
+    test('a 422 names its code', () async {
+      final e = await refusal(
+              422, {'error': 'commit refused', 'code': 'removes_last_member'})
+          as DuvetCommitRefusedException;
+      expect(e.code, 'removes_last_member');
+    });
+
+    test('any other 409 or 422 reads as before', () async {
+      for (final (status, body) in [
+        (409, {'error': 'inbox full'}),
+        (409, {'error': 'another segment holds this day', 'current': 'g1'}),
+        (409, 'not json'),
+        (422, {'error': 'this space has no storage bucket'}),
+        (422, {'error': 'another refusal', 'code': 'removes_last_member'}),
+      ]) {
+        final e = await refusal(status, body);
+        expect(e.runtimeType, DuvetApiException, reason: '$body');
+      }
+    });
+  });
+
+  // Every end-to-end encryption route, as the API takes and answers it.
+  group('end-to-end encryption', () {
+    const conv = '/api/users/@me/conversations/c1';
+    ({E2eApi e2e, List<Sent> sent}) e2e(Object? Function(Sent) reply) {
+      final c = _client(reply, duvetClient: 'android/1.1.0');
+      return (e2e: E2eApi(c.api), sent: c.sent);
+    }
+
+    String route(Sent s) => '${s.method} ${s.path}';
+    final entry = {
+      'seq': 5,
+      'kind': 'edit',
+      'data': 'AQID',
+      'sent_at': 1764000000000,
+      'generation': 0,
+      'epoch': 2,
+      'message_id': 'm1',
+      'sender_user': 'u1',
+      'sender_device': 'd1',
+    };
+    final device = {
+      'id': 'd1',
+      'name': 'Pixel 8 Pro',
+      'client': 'android/1.1.0',
+      'listed': false,
+      'created_at': _time,
+      'last_seen_at': _time,
+      'current': true,
+    };
+    const commit = Commit(
+        generation: 0,
+        epoch: 3,
+        commit: 'Y29tbWl0',
+        groupInfo: 'aW5mbw==',
+        welcome: 'd2VsY29tZQ==');
+    final taken = {'seq': 8, 'generation': 0, 'epoch': 4, 'welcome_seq': 9};
+
+    test('the configuration', () async {
+      final limits = {
+        'ciphertext_bytes': 32768,
+        'key_packages': 100,
+        'last_resort_key_packages': 1,
+        'key_package_bytes': 4096,
+        'inbox_message_bytes': 65536,
+        'history_share_parts': 64,
+        'history_share_part_bytes': 1048592,
+        'group_members': 20,
+        'listed_devices': 20,
+        'commit_bytes': 262144,
+        'welcome_bytes': 1048576,
+        'group_info_bytes': 1048576,
+        'encrypted_identity_bytes': 1024,
+        'wrapped_backup_key_bytes': 1024,
+        'wrapped_previous_backup_keys_bytes': 65536,
+        'certificate_bytes': 1024,
+        'device_list_bytes': 4096,
+        'epochs_behind': 5,
+      };
+      final c = e2e((_) => {
+            'external_sender': 'c2VuZGVy',
+            'cutover_at': '2026-12-01T00:00:00Z',
+            'paused': true,
+            'min_clients': {'android': '1.1.0', 'web': '1.2.0'},
+            'limits': limits,
+          });
+      final config = await c.e2e.config();
+      expect(route(c.sent.single), 'GET /api/e2e');
+      expect((config.externalSender, config.cutoverAt, config.paused),
+          ('c2VuZGVy', DateTime.utc(2026, 12), true));
+      expect(config.minClients, {'android': '1.1.0', 'web': '1.2.0'});
+      final l = config.limits;
+      expect([
+        l.ciphertextBytes,
+        l.keyPackages,
+        l.lastResortKeyPackages,
+        l.keyPackageBytes,
+        l.inboxMessageBytes,
+        l.historyShareParts,
+        l.historySharePartBytes,
+        l.groupMembers,
+        l.listedDevices,
+        l.commitBytes,
+        l.welcomeBytes,
+        l.groupInfoBytes,
+        l.encryptedIdentityBytes,
+        l.wrappedBackupKeyBytes,
+        l.wrappedPreviousBackupKeysBytes,
+        l.certificateBytes,
+        l.deviceListBytes,
+        l.epochsBehind,
+      ], limits.values.toList());
+      // No cutover yet.
+      final before = e2e((_) => {
+            'external_sender': 'c2VuZGVy',
+            'cutover_at': null,
+            'paused': false,
+            'min_clients': <String, String>{},
+            'limits': limits,
+          });
+      expect((await before.e2e.config()).cutoverAt, isNull);
+      // An API without its external sender's key, which makes no group.
+      final none = e2e((_) => {
+            'external_sender': null,
+            'cutover_at': null,
+            'paused': false,
+            'min_clients': <String, String>{},
+            'limits': limits,
+          });
+      expect((await none.e2e.config()).externalSender, isNull);
+    });
+
+    test('devices, and the session\'s binding to one', () async {
+      final c = e2e((s) => switch (route(s)) {
+            'POST /api/users/@me/devices/challenge' => {
+                'device_challenge': 'Y2hhbGxlbmdl'
+              },
+            'POST /api/users/@me/devices' => device,
+            'GET /api/users/@me/devices' => [
+                device,
+                {...device, 'id': 'd2', 'listed': true, 'current': false}
+              ],
+            _ => null,
+          });
+      expect(await c.e2e.deviceChallenge(), 'Y2hhbGxlbmdl');
+      final registered = await c.e2e.registerDevice(const DeviceRegistration(
+          deviceId: 'd1',
+          name: 'Pixel 8 Pro',
+          signatureKey: 'c2ln',
+          hpkeKey: 'aHBrZQ==',
+          proof: 'cHJvb2Y='));
+      await c.e2e.bindDevice('d1', 'cHJvb2Y=');
+      final devices = await c.e2e.devices();
+      await c.e2e.deleteDevice('d2');
+      expect(c.sent.map(route), [
+        'POST /api/users/@me/devices/challenge',
+        'POST /api/users/@me/devices',
+        'POST /api/users/@me/devices/d1/bind',
+        'GET /api/users/@me/devices',
+        'DELETE /api/users/@me/devices/d2',
+      ]);
+      expect(c.sent[1].json, {
+        'device_id': 'd1',
+        'name': 'Pixel 8 Pro',
+        'signature_key': 'c2ln',
+        'hpke_key': 'aHBrZQ==',
+        'proof': 'cHJvb2Y=',
+      });
+      expect(c.sent[2].json, {'proof': 'cHJvb2Y='});
+      expect((
+        registered.id,
+        registered.name,
+        registered.client,
+        registered.listed,
+        registered.current,
+        registered.createdAt,
+        registered.lastSeenAt
+      ), (
+        'd1',
+        'Pixel 8 Pro',
+        'android/1.1.0',
+        false,
+        true,
+        DateTime.parse(_time),
+        DateTime.parse(_time)
+      ));
+      expect(devices.map((d) => (d.id, d.listed, d.current)),
+          [('d1', false, true), ('d2', true, false)]);
+    });
+
+    test('the identity and its device list', () async {
+      final identity = {
+        'user_id': 'u2',
+        'identity_key': 'aWQ=',
+        'device_list': 'bGlzdA==',
+        'device_list_version': 3,
+        'certificates': ['Y2VydA==', 'Y2VydDI='],
+        'active': false,
+        'changed_at': _time,
+      };
+      final c = e2e((s) => switch (route(s)) {
+            'PUT /api/users/@me/identity' => {
+                'identity_id': 'i1',
+                'device_list_version': 1
+              },
+            'PUT /api/users/@me/device-list' => {'version': 4},
+            'GET /api/users/u2/identity' => identity,
+            'GET /api/users/identities' => [identity],
+            _ => {
+                'identity_key': 'aWQ=',
+                'device_list': 'bGlzdA==',
+                'encrypted_identity': 'ZW5j',
+                'wrapped_backup_key': 'd3JhcA==',
+                'wrapped_previous_backup_keys': null,
+                'replaced': s.query.isEmpty
+                    ? [
+                        {'identity_id': 'i0', 'replaced_at': _time}
+                      ]
+                    : null,
+              },
+          });
+      // The first identity, then a rotation with a transfer.
+      final published = await c.e2e.putIdentity(const IdentityUpload(
+          identityKey: 'aWQ=',
+          deviceList: 'bGlzdA==',
+          certificate: 'Y2VydA==',
+          encryptedIdentity: 'ZW5j',
+          wrappedBackupKey: 'd3JhcA=='));
+      await c.e2e.putIdentity(const IdentityUpload(
+          identityKey: 'aWQy',
+          deviceList: 'bGlzdDI=',
+          certificate: 'Y2VydDM=',
+          encryptedIdentity: 'ZW5jMg==',
+          wrappedBackupKey: 'd3JhcDI=',
+          wrappedPreviousBackupKeys: 'cHJldg==',
+          replaces: 'aWQ=',
+          transfers: [
+            IdentityTransfer(
+                deviceId: 'd2', certificate: 'Y2VydDQ=', message: 'dHJhbnM=')
+          ]));
+      await c.e2e.putIdentity(const IdentityUpload(
+          identityKey: 'aWQz',
+          deviceList: 'bGlzdDM=',
+          certificate: 'Y2VydDU=',
+          encryptedIdentity: 'ZW5jMw==',
+          wrappedBackupKey: 'd3JhcDM=',
+          replaces: 'aWQy',
+          reset: true));
+      final version = await c.e2e.putDeviceList(
+          const DeviceListUpload(deviceList: 'bGlzdDQ=', baseVersion: 3));
+      await c.e2e.putDeviceList(const DeviceListUpload(
+          deviceList: 'bGlzdDU=', baseVersion: 4, certificate: 'Y2VydDY='));
+      final one = await c.e2e.identity('u2');
+      final many = await c.e2e.identities(['u2', 'u3']);
+      final backup = await c.e2e.identityBackup();
+      final replaced = await c.e2e.identityBackup(identity: 'i0');
+
+      expect(c.sent[0].json, {
+        'identity_key': 'aWQ=',
+        'device_list': 'bGlzdA==',
+        'certificate': 'Y2VydA==',
+        'encrypted_identity': 'ZW5j',
+        'wrapped_backup_key': 'd3JhcA==',
+        'replaces': null,
+      });
+      expect(c.sent[1].json, {
+        'identity_key': 'aWQy',
+        'device_list': 'bGlzdDI=',
+        'certificate': 'Y2VydDM=',
+        'encrypted_identity': 'ZW5jMg==',
+        'wrapped_backup_key': 'd3JhcDI=',
+        'wrapped_previous_backup_keys': 'cHJldg==',
+        'replaces': 'aWQ=',
+        'transfers': [
+          {'device_id': 'd2', 'certificate': 'Y2VydDQ=', 'message': 'dHJhbnM='}
+        ],
+      });
+      expect(c.sent[2].json['reset'], isTrue);
+      expect((published.identityId, published.deviceListVersion), ('i1', 1));
+      expect(route(c.sent[3]), 'PUT /api/users/@me/device-list');
+      expect(c.sent[3].json, {'device_list': 'bGlzdDQ=', 'base_version': 3});
+      expect(c.sent[4].json, {
+        'device_list': 'bGlzdDU=',
+        'base_version': 4,
+        'certificate': 'Y2VydDY='
+      });
+      expect(version, 4);
+      expect((
+        one.userId,
+        one.identityKey,
+        one.deviceList,
+        one.deviceListVersion,
+        one.active,
+        one.changedAt
+      ), (
+        'u2',
+        'aWQ=',
+        'bGlzdA==',
+        3,
+        false,
+        DateTime.parse(_time)
+      ));
+      expect(one.certificates, ['Y2VydA==', 'Y2VydDI=']);
+      expect(c.sent[6].query, {
+        'ids': ['u2,u3']
+      });
+      expect(many.single.userId, 'u2');
+      expect(route(c.sent[7]), 'GET /api/users/@me/identity/backup');
+      expect(c.sent[7].query, isEmpty);
+      expect((
+        backup.identityKey,
+        backup.deviceList,
+        backup.encryptedIdentity,
+        backup.wrappedBackupKey,
+        backup.wrappedPreviousBackupKeys
+      ), (
+        'aWQ=',
+        'bGlzdA==',
+        'ZW5j',
+        'd3JhcA==',
+        null
+      ));
+      expect(backup.replaced.map((r) => (r.identityId, r.replacedAt)),
+          [('i0', DateTime.parse(_time))]);
+      // One starting over replaced, whose backup is still kept.
+      expect(c.sent[8].query, {
+        'identity': ['i0']
+      });
+      expect(replaced.replaced, isEmpty);
+    });
+
+    test('key packages', () async {
+      final c = e2e((s) => s.method == 'PUT'
+          ? {
+              'handed_out': ['a3Ax']
+            }
+          : {
+              'key_packages': [
+                {'device_id': 'd2', 'data': 'a3A='},
+                {'device_id': 'd3', 'data': 'a3Ay'},
+              ]
+            });
+      final handedOut = await c.e2e.putKeyPackages(const [
+        KeyPackageUpload(id: 'a3Ax', data: 'a3A=', expiresAt: 1767000000000),
+        KeyPackageUpload(
+            id: 'bGFzdA==',
+            data: 'bGFzdA==',
+            expiresAt: 1767000000000,
+            lastResort: true),
+      ]);
+      final claimed = await c.e2e.claimKeyPackages('u2');
+      expect(c.sent.map(route), [
+        'PUT /api/users/@me/devices/@me/key-packages',
+        'POST /api/users/u2/key-packages/claim',
+      ]);
+      expect(c.sent[0].json, {
+        'key_packages': [
+          {
+            'id': 'a3Ax',
+            'data': 'a3A=',
+            'expires_at': 1767000000000,
+            'last_resort': false
+          },
+          {
+            'id': 'bGFzdA==',
+            'data': 'bGFzdA==',
+            'expires_at': 1767000000000,
+            'last_resort': true
+          },
+        ]
+      });
+      expect(handedOut, ['a3Ax']);
+      expect(claimed.map((k) => (k.deviceId, k.data)),
+          [('d2', 'a3A='), ('d3', 'a3Ay')]);
+      // None handed out yet.
+      final none = e2e((_) => {'handed_out': <String>[]});
+      expect(await none.e2e.putKeyPackages(const []), isEmpty);
+    });
+
+    test('a conversation\'s group: its group info, a commit and its queue',
+        () async {
+      final c = e2e((s) => switch (route(s)) {
+            'GET $conv/mls/group-info' => {
+                'generation': 1,
+                'epoch': 6,
+                'group_info': 'aW5mbw=='
+              },
+            'POST $conv/mls/commits' => taken,
+            _ => {
+                'entries': [entry],
+                'last_seq': 5,
+                'floor_seq': 1,
+                'generation': 0,
+                'epoch': 2
+              },
+          });
+      final info = await c.e2e.groupInfo('c1');
+      final created = await c.e2e.commit(
+          'c1',
+          const Commit(
+              generation: 0,
+              epoch: 0,
+              commit: 'Y29tbWl0',
+              groupInfo: 'aW5mbw==',
+              initialGroupInfo: 'aW5pdA==',
+              welcome: 'd2VsY29tZQ=='));
+      await c.e2e.commit(
+          'c1',
+          const Commit(
+              generation: 0, epoch: 1, commit: 'Yw==', groupInfo: 'aQ=='));
+      final page = await c.e2e.queue('c1', 4, limit: 50);
+      await c.e2e.queue('c1', 0);
+      expect(c.sent.map(route), [
+        'GET $conv/mls/group-info',
+        'POST $conv/mls/commits',
+        'POST $conv/mls/commits',
+        'GET $conv/mls/queue',
+        'GET $conv/mls/queue',
+      ]);
+      expect((info.generation, info.epoch, info.groupInfo), (1, 6, 'aW5mbw=='));
+      expect(c.sent[1].json, {
+        'generation': 0,
+        'epoch': 0,
+        'commit': 'Y29tbWl0',
+        'group_info': 'aW5mbw==',
+        'initial_group_info': 'aW5pdA==',
+        'welcome': 'd2VsY29tZQ==',
+      });
+      expect(c.sent[2].json, {
+        'generation': 0,
+        'epoch': 1,
+        'commit': 'Yw==',
+        'group_info': 'aQ=='
+      });
+      expect(
+          (created.seq, created.generation, created.epoch, created.welcomeSeq),
+          (8, 0, 4, 9));
+      expect(c.sent[3].query, {
+        'after': ['4'],
+        'limit': ['50']
+      });
+      expect(c.sent[4].query, {
+        'after': ['0']
+      });
+      expect((page.lastSeq, page.floorSeq, page.generation, page.epoch),
+          (5, 1, 0, 2));
+      final e = page.entries.single;
+      expect((
+        e.seq,
+        e.kind,
+        e.data,
+        e.sentAt,
+        e.messageId,
+        e.senderUser,
+        e.senderDevice,
+        e.deleted
+      ), (
+        5,
+        'edit',
+        'AQID',
+        1764000000000,
+        'm1',
+        'u1',
+        'd1',
+        false
+      ));
+    });
+
+    test('members: an addition and a removal are commits, leaving a statement',
+        () async {
+      final c = e2e((s) => switch (route(s)) {
+            'POST $conv/members' => {
+                'id': 'cm3',
+                'conversation_id': 'c1',
+                'user_id': 'u3',
+                'created_at': _time,
+                'updated_at': _time,
+                'status_id': 1,
+                'commit': taken,
+              },
+            'DELETE $conv/members/u3' => {
+                'seq': 10,
+                'generation': 0,
+                'epoch': 5
+              },
+            _ => null,
+          });
+      final added = await c.e2e.addMember('c1', 'u3', commit);
+      final removed = await c.e2e.removeMember(
+          'c1',
+          'u3',
+          const Commit(
+              generation: 0, epoch: 4, commit: 'Yw==', groupInfo: 'aQ=='));
+      await c.e2e.leave('c1', statement: 'c3Q=');
+      await c.e2e.leave('c1');
+      expect(c.sent.map(route), [
+        'POST $conv/members',
+        'DELETE $conv/members/u3',
+        'DELETE $conv/members/@me',
+        'DELETE $conv/members/@me',
+      ]);
+      expect(c.sent[0].json, {
+        'user_id': 'u3',
+        'generation': 0,
+        'epoch': 3,
+        'commit': 'Y29tbWl0',
+        'group_info': 'aW5mbw==',
+        'welcome': 'd2VsY29tZQ==',
+      });
+      expect((
+        added.userId,
+        added.statusId,
+        added.commit.seq,
+        added.commit.welcomeSeq
+      ), (
+        'u3',
+        UserStatus.online,
+        8,
+        9
+      ));
+      expect(c.sent[1].json, {
+        'generation': 0,
+        'epoch': 4,
+        'commit': 'Yw==',
+        'group_info': 'aQ=='
+      });
+      expect((removed.seq, removed.epoch, removed.welcomeSeq), (10, 5, null));
+      expect(c.sent[2].json, {'statement': 'c3Q='});
+      // A conversation without a group: no statement, no body.
+      expect((c.sent[3].request.body, c.sent[3].contentType), ('', null));
+    });
+
+    final sentMessage = {
+      'id': 'm1',
+      'conversation_id': 'c1',
+      'author_id': 'u1',
+      'content': null,
+      'type': 0,
+      'created_at': _time,
+      'updated_at': _time,
+      'nonce': 'n1',
+      'ciphertext': 'Y2lwaGVy',
+      'seq': 12,
+      'sent_at': 1764000000123,
+      'generation': 0,
+      'epoch': 2,
+      'sender_device_id': 'd1',
+      'mentions': ['u2'],
+      'attachments': <Object>[],
+      'reactions': <Object>[],
+    };
+
+    test('messages: sent, edited, deleted, and the deleted ones listed',
+        () async {
+      final c = e2e((s) => switch (route(s)) {
+            'POST $conv/messages' => sentMessage,
+            'PATCH $conv/messages/m1' => {
+                'id': 'm1',
+                'edited_at': _time,
+                'entry': entry
+              },
+            'DELETE $conv/messages/m1' => {
+                'id': 'm1',
+                'entry': {...entry, 'kind': 'delete', 'seq': 6}
+              },
+            _ => {
+                'ids': ['m0', 'm1']
+              },
+          });
+      final message = await c.e2e.sendMessage(
+          'c1',
+          const EncryptedMessage(
+              ciphertext: 'Y2lwaGVy',
+              nonce: 'n1',
+              mentions: ['u2'],
+              messageReference: MessageReference(
+                  type: MessageReferenceType.reply, messageId: 'm0'),
+              allowedMentions: AllowedMentions(repliedUser: false),
+              stickerAttachmentId: 'st1'));
+      final edited = await c.e2e.editMessage('c1', 'm1', 'ZWRpdA==');
+      final deleted = await c.e2e.deleteMessage('c1', 'm1', 'dG9tYg==');
+      final gone = await c.e2e.deletedMessages('c1', after: 'm', limit: 10);
+      await c.e2e.deletedMessages('c1');
+      expect(c.sent.map(route), [
+        'POST $conv/messages',
+        'PATCH $conv/messages/m1',
+        'DELETE $conv/messages/m1',
+        'GET $conv/messages/deleted',
+        'GET $conv/messages/deleted',
+      ]);
+      // No content: conversations are end-to-end encrypted.
+      expect(c.sent[0].json, {
+        'ciphertext': 'Y2lwaGVy',
+        'nonce': 'n1',
+        'mentions': ['u2'],
+        'message_reference': {'type': 0, 'message_id': 'm0'},
+        'allowed_mentions': {'replied_user': false},
+        'sticker_attachment_id': 'st1',
+      });
+      expect((message.id, message.ciphertext, message.seq, message.nonce),
+          ('m1', 'Y2lwaGVy', 12, 'n1'));
+      expect(c.sent[1].json, {'ciphertext': 'ZWRpdA=='});
+      expect((edited.id, edited.editedAt, edited.entry.seq),
+          ('m1', DateTime.parse(_time), 5));
+      expect(c.sent[2].json, {'ciphertext': 'dG9tYg=='});
+      expect((deleted.id, deleted.entry.kind, deleted.entry.seq),
+          ('m1', 'delete', 6));
+      expect(c.sent[3].query, {
+        'after': ['m'],
+        'limit': ['10']
+      });
+      expect(c.sent[4].query, isEmpty);
+      expect(gone, ['m0', 'm1']);
+    });
+
+    test('a message\'s sealed files go up in a form, each after its ID',
+        () async {
+      final c = e2e((_) => sentMessage);
+      final progress = <(int, int)>[];
+      await c.e2e.sendMessage(
+          'c1',
+          const EncryptedMessage(
+              ciphertext: 'Y2lwaGVy',
+              nonce: 'n1',
+              mentions: ['u2', 'u3'],
+              messageReference: MessageReference(messageId: 'm0'),
+              attachmentIds: ['a1', 'a2']),
+          files: [
+            [1, 2, 3],
+            [4, 5]
+          ],
+          onProgress: (sent, total) => progress.add((sent, total)));
+      final s = c.sent.single;
+      expect(route(s), 'POST $conv/messages');
+      expect(s.contentType, startsWith('multipart/form-data; boundary='));
+      expect(s.request.headers['X-Duvet-Client'], 'android/1.1.0');
+      // A list repeats its field, as a value: no file name.
+      expect(_parts(s).map((p) => (p.name, p.filename, p.content)), [
+        ('ciphertext', null, 'Y2lwaGVy'),
+        ('nonce', null, 'n1'),
+        ('message_reference', null, '{"message_id":"m0"}'),
+        ('mentions', null, 'u2'),
+        ('mentions', null, 'u3'),
+        ('attachment_ids', null, 'a1'),
+        ('attachment_ids', null, 'a2'),
+        ('files', 'file', '\x01\x02\x03'),
+        ('files', 'file', '\x04\x05'),
+      ]);
+      expect(
+          s.request.body,
+          contains('content-type: application/octet-stream\r\n'
+              'content-disposition: form-data; name="files"; filename="file"'));
+      expect(progress.last.$1, s.request.bodyBytes.length);
+    });
+
+    test('the inbox between devices', () async {
+      final c = e2e((s) => switch (route(s)) {
+            'POST /api/devices/d2/inbox' => {'id': 'i1'},
+            'GET /api/users/@me/devices/@me/inbox' => [
+                {
+                  'id': 'i1',
+                  'from_user_id': 'u2',
+                  'from_device_id': 'd2',
+                  'message': 'bWVzc2FnZQ==',
+                  'created_at': _time,
+                }
+              ],
+            _ => null,
+          });
+      expect(await c.e2e.sendToDevice('d2', 'bWVzc2FnZQ=='), 'i1');
+      final inbox = await c.e2e.inbox(after: 'i0', limit: 50);
+      await c.e2e.inbox();
+      await c.e2e.clearInbox('i1');
+      expect(c.sent.map(route), [
+        'POST /api/devices/d2/inbox',
+        'GET /api/users/@me/devices/@me/inbox',
+        'GET /api/users/@me/devices/@me/inbox',
+        'DELETE /api/users/@me/devices/@me/inbox',
+      ]);
+      expect(c.sent[0].json, {'message': 'bWVzc2FnZQ=='});
+      expect(c.sent[1].query, {
+        'after': ['i0'],
+        'limit': ['50']
+      });
+      expect(c.sent[2].query, isEmpty);
+      expect(c.sent[3].query, {
+        'through': ['i1']
+      });
+      final m = inbox.single;
+      expect((m.id, m.fromUserId, m.fromDeviceId, m.message, m.createdAt),
+          ('i1', 'u2', 'd2', 'bWVzc2FnZQ==', DateTime.parse(_time)));
+    });
+
+    final share = {
+      'id': 's1',
+      'conversation_id': 'c1',
+      'from_user_id': 'u1',
+      'kind': 'share',
+      'range': 'week',
+      'starts_at': '2026-11-18T00:00:00Z',
+      'size': 1048609,
+      'parts': 2,
+    };
+
+    test('shared history: a package, its parts, its completion and its ack',
+        () async {
+      final c = e2e((s) => switch (route(s)) {
+            'PUT $conv/history-shares/s1' => share,
+            'GET /api/users/@me/history-shares' => [
+                share,
+                {...share, 'id': 's2', 'kind': 'catch_up', 'range': null}
+              ],
+            _ => null,
+          });
+      final made = await c.e2e.putShare(
+          'c1',
+          's1',
+          HistoryShareUpload(
+              toUserId: 'u2',
+              kind: 'share',
+              range: 'week',
+              startsAt: DateTime.utc(2026, 11, 18),
+              size: 1048609,
+              parts: 2));
+      await c.e2e.putShare(
+          'c1',
+          's1',
+          HistoryShareUpload(
+              toUserId: 'u2',
+              kind: 'catch_up',
+              startsAt: DateTime.utc(2026, 11, 18),
+              size: 17,
+              parts: 1));
+      final progress = <(int, int)>[];
+      await c.e2e.putSharePart('c1', 's1', 0, List.filled(100 * 1024, 9),
+          onProgress: (sent, total) => progress.add((sent, total)));
+      await c.e2e.completeShare('c1', 's1');
+      final shares = await c.e2e.shares();
+      await c.e2e.ackShare('s1');
+      expect(c.sent.map(route), [
+        'PUT $conv/history-shares/s1',
+        'PUT $conv/history-shares/s1',
+        'PUT $conv/history-shares/s1/parts/0',
+        'POST $conv/history-shares/s1/complete',
+        'GET /api/users/@me/history-shares',
+        'POST /api/history-shares/s1/ack',
+      ]);
+      expect(c.sent[0].json, {
+        'to_user_id': 'u2',
+        'kind': 'share',
+        'range': 'week',
+        'starts_at': '2026-11-18T00:00:00.000Z',
+        'size': 1048609,
+        'parts': 2,
+      });
+      // A catch-up has no range.
+      expect(c.sent[1].json.containsKey('range'), isFalse);
+      expect((
+        made.id,
+        made.conversationId,
+        made.fromUserId,
+        made.kind,
+        made.range,
+        made.startsAt,
+        made.size,
+        made.parts
+      ), (
+        's1',
+        'c1',
+        'u1',
+        'share',
+        'week',
+        DateTime.utc(2026, 11, 18),
+        1048609,
+        2
+      ));
+      // The part goes as it is, with the session's headers.
+      final part = c.sent[2];
+      expect(part.contentType, 'application/octet-stream');
+      expect(part.request.bodyBytes, List.filled(100 * 1024, 9));
+      expect(part.request.headers['Authorization'], 'Bearer tok');
+      expect(part.request.headers['X-Duvet-Client'], 'android/1.1.0');
+      expect(progress.last, (100 * 1024, 100 * 1024));
+      expect(progress.length, greaterThan(1));
+      expect(shares.map((s) => (s.id, s.kind, s.range)),
+          [('s1', 'share', 'week'), ('s2', 'catch_up', null)]);
+    });
+
+    test('the backup: its segments listed, one put in its day\'s place',
+        () async {
+      final segment = {
+        'id': 'g1',
+        'conversation_id': 'c1',
+        'day': '2026-11-24',
+        'complete': true,
+        'key_id': 'a2V5aWQ=',
+        'size': 2048,
+        'created_at': _time,
+      };
+      final c = e2e((s) => s.method == 'PUT' ? {'id': 'g2'} : [segment]);
+      final segments = await c.e2e
+          .segments(conversationId: 'c1', after: 'g0', identity: 'i0');
+      await c.e2e.segments();
+      final id =
+          await c.e2e.putSegment('c1', '2026-11-24', [1, 2, 3], replaces: 'g1');
+      await c.e2e.putSegment('c1', '2026-11-25', [4]);
+      expect(c.sent.map(route), [
+        'GET /api/users/@me/backup/segments',
+        'GET /api/users/@me/backup/segments',
+        'PUT /api/users/@me/backup/segments/c1/2026-11-24',
+        'PUT /api/users/@me/backup/segments/c1/2026-11-25',
+      ]);
+      expect(c.sent[0].query, {
+        'conversation_id': ['c1'],
+        'after': ['g0'],
+        'identity': ['i0'],
+      });
+      expect(c.sent[1].query, isEmpty);
+      final s = segments.single;
+      expect((
+        s.id,
+        s.conversationId,
+        s.day,
+        s.complete,
+        s.keyId,
+        s.size,
+        s.createdAt
+      ), (
+        'g1',
+        'c1',
+        '2026-11-24',
+        true,
+        'a2V5aWQ=',
+        2048,
+        DateTime.parse(_time)
+      ));
+      expect(id, 'g2');
+      expect(c.sent[2].query, {
+        'replaces': ['g1']
+      });
+      expect(c.sent[2].contentType, 'application/octet-stream');
+      expect(c.sent[2].request.bodyBytes, [1, 2, 3]);
+      // It saw none of that day.
+      expect(c.sent[3].query, {
+        'replaces': ['none']
+      });
+    });
+
+    test('decryption failures: a kind and how many, and staff\'s counts',
+        () async {
+      final c = e2e((s) => s.method == 'GET'
+          ? [
+              {
+                'day': '2026-11-24',
+                'kind': 'message',
+                'client': 'android',
+                'version': '1.1.0',
+                'count': 3
+              }
+            ]
+          : null);
+      await c.e2e.reportDecryptFailure('message');
+      await c.e2e.reportDecryptFailure('welcome', count: 4);
+      final counts =
+          await c.e2e.decryptFailures(from: '2026-11-01', to: '2026-11-24');
+      await c.e2e.decryptFailures();
+      expect(c.sent.map(route), [
+        'POST /api/e2e/decrypt-failures',
+        'POST /api/e2e/decrypt-failures',
+        'GET /api/internal/e2e/decrypt-failures',
+        'GET /api/internal/e2e/decrypt-failures',
+      ]);
+      expect(c.sent[0].json, {'kind': 'message'});
+      expect(c.sent[1].json, {'kind': 'welcome', 'count': 4});
+      expect(c.sent[2].query, {
+        'from': ['2026-11-01'],
+        'to': ['2026-11-24']
+      });
+      expect(c.sent[3].query, isEmpty);
+      final count = counts.single;
+      expect((count.day, count.kind, count.client, count.version, count.count),
+          ('2026-11-24', 'message', 'android', '1.1.0', 3));
+    });
+
+    test(
+        'a 2xx answer that doesn\'t read is a DuvetMalformedAnswerException: '
+        'the API took the request', () async {
+      final calls = <String, Future<Object?> Function(E2eApi)>{
+        'config': (e) => e.config(),
+        'deviceChallenge': (e) => e.deviceChallenge(),
+        'registerDevice': (e) => e.registerDevice(const DeviceRegistration(
+            deviceId: 'd1',
+            name: 'Pixel 8 Pro',
+            signatureKey: 'c2ln',
+            hpkeKey: 'aHBrZQ==',
+            proof: 'cHJvb2Y=')),
+        'devices': (e) => e.devices(),
+        'putIdentity': (e) => e.putIdentity(const IdentityUpload(
+            identityKey: 'aWQ=',
+            deviceList: 'bGlzdA==',
+            certificate: 'Y2VydA==',
+            encryptedIdentity: 'ZW5j',
+            wrappedBackupKey: 'd3JhcA==')),
+        'putDeviceList': (e) => e.putDeviceList(
+            const DeviceListUpload(deviceList: 'bGlzdA==', baseVersion: 3)),
+        'identity': (e) => e.identity('u2'),
+        'identities': (e) => e.identities(['u2']),
+        'identityBackup': (e) => e.identityBackup(),
+        'putKeyPackages': (e) => e.putKeyPackages(const []),
+        'claimKeyPackages': (e) => e.claimKeyPackages('u2'),
+        'groupInfo': (e) => e.groupInfo('c1'),
+        'commit': (e) => e.commit('c1', commit),
+        'queue': (e) => e.queue('c1', 0),
+        'addMember': (e) => e.addMember('c1', 'u2', commit),
+        'removeMember': (e) => e.removeMember('c1', 'u2', commit),
+        'sendMessage': (e) => e.sendMessage(
+            'c1', const EncryptedMessage(ciphertext: 'Y2lwaGVy', nonce: 'n1')),
+        'editMessage': (e) => e.editMessage('c1', 'm1', 'ZWRpdA=='),
+        'deleteMessage': (e) => e.deleteMessage('c1', 'm1', 'dG9tYg=='),
+        'deletedMessages': (e) => e.deletedMessages('c1'),
+        'sendToDevice': (e) => e.sendToDevice('d2', 'bXNn'),
+        'inbox': (e) => e.inbox(),
+        'putShare': (e) => e.putShare(
+            'c1',
+            's1',
+            HistoryShareUpload(
+                toUserId: 'u2',
+                kind: 'share',
+                range: 'week',
+                startsAt: DateTime.utc(2026, 11, 18),
+                size: 16,
+                parts: 1)),
+        'shares': (e) => e.shares(),
+        'sharePart': (e) => e.sharePart('s1', 0),
+        'segments': (e) => e.segments(),
+        'putSegment': (e) => e.putSegment('c1', '2026-11-24', [1, 2]),
+        'segment': (e) => e.segment('g1'),
+        'decryptFailures': (e) => e.decryptFailures(),
+      };
+      // Not JSON, and JSON of no answer's shape.
+      for (final (body, cause) in [
+        ('<html>', isA<FormatException>()),
+        ('"taken"', isA<TypeError>()),
+      ]) {
+        for (final MapEntry(key: name, value: call) in calls.entries) {
+          final c = e2e((_) => http.Response(body, 200));
+          await expectLater(
+              call(c.e2e),
+              throwsA(isA<DuvetMalformedAnswerException>()
+                  .having((e) => e.statusCode, 'statusCode', 200)
+                  .having((e) => e.body, 'body', body)
+                  .having((e) => e.cause, 'cause', cause)),
+              reason: '$name answered $body');
+        }
+      }
+    });
+  });
+
+  // A part's, a segment's or an encrypted attachment's file, at the URL the
+  // API signed for it: fetched with none of the app's headers, which a
+  // redirect would carry to the storage.
+  group('signed downloads', () {
+    test(
+        'a part and a segment come from the URL their route answers, '
+        'with none of the app\'s headers', () async {
+      final c = _client((s) {
+        if (s.path.startsWith('/attachments/')) {
+          return http.Response.bytes([1, 2, 3], 200);
+        }
+        final file = s.path.contains('history-shares') ? 'a1' : 'a2';
+        return {'url': '/attachments/$file?sig=ab%2Bc/d&exp=9'};
+      }, duvetClient: 'android/1.1.0');
+      final e2e = E2eApi(c.api);
+      expect(await e2e.sharePart('s1', 1), [1, 2, 3]);
+      expect(await e2e.segment('g1'), [1, 2, 3]);
+      expect(c.sent.map((s) => '${s.method} ${s.request.url}'), [
+        'GET https://api.duvet.chat/api/history-shares/s1/parts/1',
+        // The query as the API signed it, untouched.
+        'GET https://api.duvet.chat/attachments/a1?sig=ab%2Bc/d&exp=9',
+        'GET https://api.duvet.chat/api/users/@me/backup/segments/g1',
+        'GET https://api.duvet.chat/attachments/a2?sig=ab%2Bc/d&exp=9',
+      ]);
+      // The routes go with the session; the files with nothing of the app's.
+      for (final s in [c.sent[0], c.sent[2]]) {
+        expect(s.request.headers['Authorization'], 'Bearer tok');
+      }
+      for (final s in [c.sent[1], c.sent[3]]) {
+        expect(s.request.headers.keys.map((k) => k.toLowerCase()),
+            isNot(anyElement(isIn(_appHeaders))));
+      }
+    });
+
+    test('an attachment\'s signed URL: its bytes, with progress as they come',
+        () async {
+      final requests = <http.BaseRequest>[];
+      final api = RestClient(MockClient.streaming((request, _) async {
+        requests.add(request);
+        return http.StreamedResponse(
+            Stream.fromIterable([
+              [1, 2, 3],
+              [4, 5, 6, 7]
+            ]),
+            200,
+            contentLength: 7);
+      }), token: 'tok', sessionToken: 'sess', duvetClient: 'android/1.1.0');
+      final progress = <(int, int)>[];
+      final bytes = await E2eApi(api).signedFile(
+          'https://api.duvet.chat/attachments/a1?sig=x&exp=9',
+          onProgress: (received, total) => progress.add((received, total)));
+      expect(bytes, [1, 2, 3, 4, 5, 6, 7]);
+      expect(progress, [(3, 7), (7, 7)]);
+      expect(requests.single.url.toString(),
+          'https://api.duvet.chat/attachments/a1?sig=x&exp=9');
+      expect(requests.single.headers.keys.map((k) => k.toLowerCase()),
+          isNot(anyElement(isIn(_appHeaders))));
+    });
+
+    test('a length the answer doesn\'t say is -1', () async {
+      final api = RestClient(MockClient.streaming((request, _) async {
+        return http.StreamedResponse(Stream.value([1, 2]), 200);
+      }));
+      final progress = <(int, int)>[];
+      await E2eApi(api).signedFile('/attachments/a1?sig=x&exp=9',
+          onProgress: (received, total) => progress.add((received, total)));
+      expect(progress, [(2, -1)]);
+    });
+
+    test('a refused download is the storage\'s, not the session\'s', () async {
+      final c = _client((_) => http.Response('expired', 403));
+      await expectLater(
+          E2eApi(c.api).signedFile('/attachments/a1?sig=x&exp=1'),
+          throwsA(isA<DuvetApiException>()
+              .having((e) => e.statusCode, 'statusCode', 403)
+              .having((e) => e, 'type', isNot(isA<DuvetAuthException>()))));
+      // No renewal: the session has nothing to do with it.
+      expect(c.sent, hasLength(1));
+    });
+
+    test('a limited download says the wait it was given', () async {
+      final c = _client((_) =>
+          http.Response('slow down', 429, headers: {'retry-after': '12'}));
+      await expectLater(
+          E2eApi(c.api).signedFile('/attachments/a1?sig=x&exp=9'),
+          throwsA(isA<DuvetApiException>().having(
+              (e) => e.retryAfter, 'retryAfter', const Duration(seconds: 12))));
+    });
+
+    test('a download that stops arriving fails with TimeoutException',
+        () async {
+      final api = RestClient(
+          MockClient.streaming((request, _) async => http.StreamedResponse(
+              Stream.fromFuture(Completer<List<int>>().future), 200)),
+          requestTimeout: const Duration(milliseconds: 100));
+      await expectLater(E2eApi(api).signedFile('/attachments/a1?sig=x&exp=9'),
+          throwsA(isA<TimeoutException>()));
     });
   });
 }

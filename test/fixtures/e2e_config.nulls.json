@@ -1,0 +1,26 @@
+{
+  "external_sender": "",
+  "cutover_at": null,
+  "paused": false,
+  "min_clients": {},
+  "limits": {
+    "ciphertext_bytes": 2,
+    "key_packages": 2,
+    "last_resort_key_packages": 2,
+    "key_package_bytes": 2,
+    "inbox_message_bytes": 2,
+    "history_share_parts": 2,
+    "history_share_part_bytes": 2,
+    "group_members": 2,
+    "listed_devices": 2,
+    "commit_bytes": 2,
+    "welcome_bytes": 2,
+    "group_info_bytes": 2,
+    "encrypted_identity_bytes": 2,
+    "wrapped_backup_key_bytes": 2,
+    "wrapped_previous_backup_keys_bytes": 2,
+    "certificate_bytes": 2,
+    "device_list_bytes": 2,
+    "epochs_behind": 2
+  }
+}

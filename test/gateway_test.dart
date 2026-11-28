@@ -272,6 +272,83 @@ void main() {
     expect(gateway.identified.map((i) => i['platform']), ['mobile', 'mobile']);
   });
 
+  test('the client goes in each identify, and the device once the app names it',
+      () async {
+    String? device;
+    final manager = GatewayManager(
+        RestClient(http.Client(),
+            token: _token,
+            router: gateway.router,
+            duvetClient: 'android/1.1.0'),
+        router: gateway.router,
+        log: (_, __) {},
+        identifyDevice: () => device);
+    addTearDown(manager.destroy);
+    await manager.connectAll();
+    await gateway.identifies(1);
+
+    // The app registers the device, then opens a new socket.
+    device = '01977c2a-0000-7000-8000-000000000001';
+    final reconnected = manager.onConnectionState
+        .where((s) => s == GatewayConnectionState.connected)
+        .first;
+    await gateway.open.single.close();
+    await reconnected;
+    await gateway.identifies(2);
+    expect(gateway.identified.map((i) => (i['client'], i['device_id'])), [
+      ('android/1.1.0', null),
+      ('android/1.1.0', device),
+    ]);
+    // None named before the app knew it.
+    expect(
+        gateway.identified.first, {'token': _token, 'client': 'android/1.1.0'});
+  });
+
+  test(
+      'a resuming identify names the client and the device too, and a fresh '
+      'session the device named since', () async {
+    const first = '01977c2a-0000-7000-8000-000000000001';
+    const later = '01977c2a-0000-7000-8000-000000000002';
+    var device = first;
+    final manager = GatewayManager(
+        RestClient(http.Client(),
+            token: _token,
+            router: gateway.router,
+            duvetClient: 'android/1.1.0'),
+        router: gateway.router,
+        log: (_, __) {},
+        resume: true,
+        identifyDevice: () => device);
+    addTearDown(manager.destroy);
+    // Each socket's READY, once the client has it: a READY on its way would
+    // end a fresh session wanted after it was sent.
+    Future<void> ready() => manager.onEvent.firstWhere((e) => e is ReadyEvent);
+    Future<void> dropAndReconnect() async {
+      final next = ready();
+      await gateway.open.single.close();
+      await next;
+    }
+
+    final opened = ready();
+    await manager.connectAll();
+    await opened;
+    // The socket drops: the next one resumes READY's session.
+    await dropAndReconnect();
+    // The app names another device: it takes effect on a new session.
+    device = later;
+    manager.wantFreshSession();
+    await dropAndReconnect();
+
+    expect(
+        gateway.identified.map((i) =>
+            (i['client'], i['device_id'], i['session_token'], i['last_seq'])),
+        [
+          ('android/1.1.0', first, null, null),
+          ('android/1.1.0', first, 'session-1', 1),
+          ('android/1.1.0', later, null, 1),
+        ]);
+  });
+
   test('a bot\'s shards send theirs in identify', () async {
     // The second shard's first attempt is refused.
     gateway.plan = (n) => n == 1 ? _Answer.unauthorized : _Answer.upgrade;

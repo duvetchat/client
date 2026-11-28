@@ -51,7 +51,10 @@ void main() {
   }
 
   final recorder = _Recorder();
-  final api = RestClient(recorder);
+  // As the Android app with end-to-end encryption names itself: the API with
+  // encryption takes a conversation's routes, and encryption's, only from a
+  // client whose version has it.
+  final api = RestClient(recorder, duvetClient: 'android/1.1.0');
   tearDownAll(recorder.close);
 
   /// Runs [call]; when it throws anything but an API error, fails with the
@@ -118,6 +121,16 @@ void main() {
       await parsed(
           'GET /api/users/@me/friends/requests/sent', api.getSentRequests);
       await parsed('GET /api/users/@me/team-invites', api.listMyTeamInvites);
+    });
+
+    test('end-to-end encryption: its configuration and the devices', () async {
+      final e2e = E2eApi(api);
+      final config = await parsed('GET /api/e2e', e2e.config);
+      // Production's API doesn't start without its external sender.
+      expect(config.externalSender, isNotNull);
+      final devices = await parsed('GET /api/users/@me/devices', e2e.devices);
+      // This session bound itself to none of them.
+      expect(devices.where((d) => d.current), isEmpty);
     });
 
     test('teams and applications', () async {

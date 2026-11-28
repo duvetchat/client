@@ -1,3 +1,102 @@
+## 3.0.0 – 2026-11-28
+
+What the mobile app needs of the API with end-to-end encryption: its routes,
+objects and events, the client's name, raw uploads, downloads from signed URLs
+and the refusals it tells apart. Calls, names and behavior from before stay,
+but for what "Breaking changes" lists.
+
+### Breaking changes
+
+- **The conversation calls that sent in the clear are gone**: the API with
+  end-to-end encryption refuses each of them, and each sent a conversation's
+  text, a recording, or a change of its members without its group's commit.
+  In their place, `E2eApi`'s:
+  - `sendDirectMessage`: `E2eApi.sendMessage`, the message sealed in its
+    `ciphertext` and its files sealed;
+  - `sendDMVoiceNote`: `E2eApi.sendMessage` too, the recording sealed among
+    its files;
+  - `updateDirectMessage`: `E2eApi.editMessage`;
+  - `addConversationMember`: `E2eApi.addMember`, with the owner's commit;
+  - `removeConversationMember`: `E2eApi.removeMember`, with the owner's
+    commit.
+
+  `leaveConversation`, `deleteDirectMessage` and `searchConversationMessages`
+  stay, for what that API takes from them: leaving a conversation with no
+  group, deleting a notice, and a search without words.
+- Ten events join the sealed `GatewayEventPayload`: `MlsCommitPayloadEvent`,
+  `MlsWelcomePayloadEvent`, `MlsProposalPayloadEvent`,
+  `DeviceMessagePayloadEvent`, `KeyPackagesLowPayloadEvent`,
+  `DeviceAddedEvent`, `DeviceRemovedEvent`, `IdentityUpdatedEvent`,
+  `HistoryShareCreatedEvent` and `DMMessageEditedEvent` (see "Added"). A
+  `switch` over it without a default case has to handle them.
+- `RestMethods.request` takes `bytes`, and its `fields` any values
+  (`Map<String, Object>`, a list repeating its field), and `resetPassword`
+  takes `removeDevices`: a class that overrides either has to take them too.
+- `RestMethods` has `duvetClient`, and `GatewayEvents` ten new streams
+  (`onDMEdit`, `onMlsCommit` and the like, see "Added"): a class that
+  implements either, rather than mixing it in, has to add them.
+
+### Added
+
+- **What the app is**: `RestClient(duvetClient: 'android/1.1.0')` sends it as
+  `X-Duvet-Client` with every request, renewals included, and each gateway
+  identify as `client`. The API takes encryption's routes, and a
+  conversation's, only from a client whose version has it. `identifyDevice`
+  on `GatewayManager` and `GatewayClient` names the user's device in each
+  identify (`device_id`), read as each one goes out.
+- **Encryption's routes**, `E2eApi(api)`, named as the desktop app's: the
+  configuration (`config`); devices (`deviceChallenge`, `registerDevice`,
+  `bindDevice`, `devices`, `deleteDevice`); the identity (`putIdentity`,
+  `putDeviceList`, `identity`, `identities`, `identityBackup` with its
+  `replaced` identities and `identity:`); key packages (`putKeyPackages`,
+  `claimKeyPackages`); a conversation's group (`groupInfo`, `commit`,
+  `queue`); members (`addMember`, `removeMember`, `leave`); messages
+  (`sendMessage`, `editMessage`, `deleteMessage`, `deletedMessages`); the
+  inbox between devices (`sendToDevice`, `inbox`, `clearInbox`); shared
+  history (`putShare`, `putSharePart`, `completeShare`, `shares`, `sharePart`,
+  `ackShare`); the backup (`segments`, `putSegment`, `segment`); and
+  decryption failures (`reportDecryptFailure`, `decryptFailures`). Binary
+  fields are standard base64, as the core takes them.
+- **Raw uploads**: `request(bytes:)` sends a body as it is
+  (`application/octet-stream`), a package's parts and the backup's segments
+  among them, with its progress. A form's list value repeats its field.
+- **Downloads from a signed URL**: `E2eApi.signedFile(url)` fetches a part's,
+  a segment's or an encrypted attachment's file with none of the app's
+  headers (no `Authorization`, `X-Session-Token`, `X-Duvet-Client` or
+  cookie), with its progress as it comes (`sendWithin`'s
+  `onReceiveProgress`). Its refusal is a `DuvetApiException`, never a
+  `DuvetAuthException`.
+- **The refusals encryption tells apart**, subtypes of `DuvetApiException`:
+  `DuvetUpdateRequiredException` (426, with `client` and `minimum`),
+  `DuvetPausedException` (the 503 while encrypted conversations are paused,
+  with `retryAfter`), `DuvetStaleMessageException`,
+  `DuvetEpochTakenException`, `DuvetIdentityChangedException`,
+  `DuvetDeviceListChangedException` (409s, with what each carries) and
+  `DuvetCommitRefusedException` (a 422's `code`). Any other error reads as
+  before.
+- **An answer that doesn't read**: a 2xx answer of `E2eApi`'s that doesn't
+  read is a `DuvetMalformedAnswerException`, with its `statusCode`, `body` and
+  `cause`, never a `TypeError` or a `FormatException`: the API took the
+  request, and only its answer is lost.
+- **How long a refusal asks to wait** (duvetchat/client#52):
+  `DuvetApiException.retryAfter` is the answer's `Retry-After` in seconds, as
+  the API sends it with its 429s and 503s, or null when it doesn't say. Every
+  refusal carries it, the session refresh's and a signed download's too, and
+  `retryAfterOf(headers)` reads it.
+- **The objects and events**: `Conversation.legacy` and `mls`
+  (`ConversationGroup`); an encrypted `DirectMessage`'s `ciphertext`, `seq`,
+  `sentAt`, `generation`, `epoch`, `senderDeviceId`, `editedAt` and
+  `mentions`; a history share's notice (`MessageType.historyShare`,
+  `DirectMessage.historyShare`); `DMMessageDeleteEvent.entry`, an encrypted
+  message's tombstone; `Attachment.kind`; `SignIn.deviceChallenge`;
+  `resetPassword(removeDevices:)`. MLS_COMMIT, MLS_WELCOME, MLS_PROPOSAL,
+  DEVICE_MESSAGE, KEY_PACKAGES_LOW, DEVICE_ADD, DEVICE_REMOVE,
+  IDENTITY_UPDATE and HISTORY_SHARE_CREATE are read into their types, each on
+  its stream (`onMlsCommit` and the like), and DM_MESSAGE_UPDATE of an
+  encrypted message, its edit's entry, is a `DMMessageEditedEvent`
+  (`onDMEdit`): an API before encryption still sends the message, a
+  `DMMessageUpdatedEvent`.
+
 ## 2.10.0 – 2026-11-18
 
 ### Added

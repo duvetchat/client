@@ -21,31 +21,11 @@
         "color_to": 2
       },
       "footer": {
-        "text": "s-string",
-        "icon_url": "s-string"
-      },
-      "image": {
-        "url": "s-string",
-        "width": 2,
-        "height": 2,
-        "content_type": "s-string"
-      },
-      "thumbnail": {
-        "url": "s-string",
-        "width": 2,
-        "height": 2,
-        "content_type": "s-string"
-      },
-      "video": {
-        "url": "s-string",
-        "width": 2,
-        "height": 2,
-        "content_type": "s-string"
+        "text": "s-string"
       },
       "author": {
         "name": "s-string",
-        "url": "s-string",
-        "icon_url": "s-string"
+        "url": "s-string"
       },
       "fields": [
         {
@@ -246,5 +226,6 @@
     "is_bot": true,
     "flags": 2,
     "badges": 2
-  }
+  },
+  "webhook_id": "11020202-0202-7002-8002-020202020202"
 }

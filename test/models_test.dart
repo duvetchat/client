@@ -19,6 +19,51 @@ Map<String, dynamic> _load(String name, String variant) =>
     jsonDecode(File('test/fixtures/$name.$variant.json').readAsStringSync())
         as Map<String, dynamic>;
 
+/// A message's end-to-end encryption fields, which a notice, or a message of an
+/// API from before encryption, doesn't have: the tests take them out of a
+/// fixture, which a generator run against the API fills whole.
+const _encryptedFields = {
+  'ciphertext',
+  'seq',
+  'sent_at',
+  'generation',
+  'epoch',
+  'sender_device_id',
+  'edited_at',
+  'mentions',
+  'history_share',
+};
+
+/// DM_MESSAGE_UPDATE's data as an API before end-to-end encryption sends it:
+/// the edited message, which no fixture holds, as the API with encryption
+/// sends an edit's entry (dm_message_edit_event).
+final _messageBeforeEncryption = <String, dynamic>{
+  'id': '10020202-0202-7002-8002-020202020202',
+  'conversation_id': '11020202-0202-7002-8002-020202020202',
+  'author_id': '11020202-0202-7002-8002-020202020202',
+  'content': 'edited',
+  'type': 0,
+  'created_at': '2026-10-22T10:00:00.123456789Z',
+  'updated_at': '2026-10-22T10:00:00.123456789Z',
+  'sticker_attachment_id': null,
+  'embeds': <Object>[],
+  'user': {
+    'id': '11020202-0202-7002-8002-020202020202',
+    'username': 'ana',
+    'email_verified': false,
+    'alias': null,
+    'avatar': null,
+    'banner': null,
+    'custom': '',
+    'created_at': '2026-10-22T10:00:00.123456789Z',
+    'updated_at': '2026-10-22T10:00:00.123456789Z',
+    'deleted_at': null,
+    'is_bot': false,
+    'flags': 0,
+    'badges': 0,
+  },
+};
+
 /// The fixture's variants. [always] are the keys the server always sets
 /// although its type allows null (e.g. a room message's room_id): the nulls
 /// variant takes them from the full one.
@@ -210,7 +255,19 @@ void main() {
     const author = ['author_id'];
     _parses('message_response', DirectMessage.fromJson, always: author);
     _parses('dm_message_create', DirectMessage.fromJson, always: author);
-    _parses('dm_message_update', DirectMessage.fromJson, always: author);
+    test('DM_MESSAGE_UPDATE\'s message from before end-to-end encryption', () {
+      final edited = DirectMessage.fromJson(_messageBeforeEncryption);
+      expect((edited.content, edited.user?.username, edited.ciphertext),
+          ('edited', 'ana', null));
+      // Its nullable fields null, and no user.
+      final bare = DirectMessage.fromJson({
+        ..._messageBeforeEncryption,
+        'conversation_id': null,
+        'content': null,
+      }..remove('user'));
+      expect(
+          (bare.conversationId, bare.content, bare.user), (null, null, null));
+    });
     // A conversation's thread has a room's thread's shape.
     _parses('thread_message', DirectMessage.fromJson, always: author);
 
@@ -545,7 +602,7 @@ void main() {
       'SPACE_CREATE': ('space_create_event', []),
       'SPACE_UPDATE': ('space', []),
       'SPACE_DELETE': ('space_delete_event', []),
-      'ROOM_CREATE': ('room', []),
+      'ROOM_CREATE': ('room_create_event', []),
       'ROOM_UPDATE': ('room', []),
       'ROOM_DELETE': ('room_delete_event', []),
       'ROOM_OVERWRITE_UPDATE': ('room_overwrite', []),
@@ -589,7 +646,7 @@ void main() {
       'CONVERSATION_MEMBER_ADD': ('conversation_member_add_event', []),
       'CONVERSATION_MEMBER_REMOVE': ('conversation_member_remove_event', []),
       'DM_MESSAGE_CREATE': ('dm_message_create', ['author_id']),
-      'DM_MESSAGE_UPDATE': ('dm_message_update', ['author_id']),
+      'DM_MESSAGE_UPDATE': ('dm_message_edit_event', []),
       'DM_MESSAGE_DELETE': ('dm_message_delete_event', []),
       'DM_REACTION_ADD': ('dm_reaction_add_event', []),
       'DM_REACTION_REMOVE': ('dm_reaction_remove_event', []),
@@ -615,6 +672,17 @@ void main() {
         'notification_settings_update_event',
         []
       ),
+      // End-to-end encryption's.
+      'MLS_COMMIT': ('mls_commit_event', []),
+      // The API's MlsProposal is MlsCommit.
+      'MLS_PROPOSAL': ('mls_commit_event', []),
+      'MLS_WELCOME': ('mls_welcome_event', []),
+      'DEVICE_MESSAGE': ('device_message_event', []),
+      'KEY_PACKAGES_LOW': ('key_packages_low_event', []),
+      'DEVICE_ADD': ('device_add_event', []),
+      'DEVICE_REMOVE': ('device_remove_event', []),
+      'IDENTITY_UPDATE': ('identity_update_event', []),
+      'HISTORY_SHARE_CREATE': ('history_share_create_event', []),
     };
 
     // Handled by the client, but neither the API nor the gateway sends them.
@@ -1227,19 +1295,12 @@ void main() {
     });
 
     test('SPACE_CREATE: the rooms\' read states, none when left out', () {
-      final full = dispatch('SPACE_CREATE', _load('space_create_event', 'full'))
-          as SpaceCreateEvent;
-      final state =
-          full.data.readStates['12020202-0202-7002-8002-020202020202']!;
-      expect((
-        state.unread,
-        state.lastRead,
-        state.lastMsg
-      ), (
-        true,
-        '10020202-0202-7002-8002-020202020202',
-        '11020202-0202-7002-8002-020202020202'
-      ));
+      final json = _load('space_create_event', 'full');
+      final full = dispatch('SPACE_CREATE', json) as SpaceCreateEvent;
+      final room = (json['read_states'] as Map<String, dynamic>).keys.single;
+      final state = full.data.readStates[room]!;
+      expect((state.unread, state.lastRead, state.lastMsg),
+          (true, 's-string', 's-string'));
       // READY's own and a bot's leave them out.
       final nulls =
           dispatch('SPACE_CREATE', _load('space_create_event', 'nulls'))
@@ -1248,11 +1309,11 @@ void main() {
     });
 
     test('ROOM_CREATE: the room\'s read state, null when left out', () {
-      final full =
-          dispatch('ROOM_CREATE', _load('room', 'full')) as RoomCreateEvent;
+      final full = dispatch('ROOM_CREATE', _load('room_create_event', 'full'))
+          as RoomCreateEvent;
       expect(full.data.readState?.unread, isTrue);
-      final nulls =
-          dispatch('ROOM_CREATE', _load('room', 'nulls')) as RoomCreateEvent;
+      final nulls = dispatch('ROOM_CREATE', _load('room_create_event', 'nulls'))
+          as RoomCreateEvent;
       expect(nulls.data.readState, isNull);
     });
 
@@ -1392,11 +1453,12 @@ void main() {
     });
 
     test('SPACE_CREATE: the voice rooms\' states', () {
-      final e = dispatch('SPACE_CREATE', _load('space_create_event', 'full'))
-          as SpaceCreateEvent;
+      final json = _load('space_create_event', 'full');
+      final e = dispatch('SPACE_CREATE', json) as SpaceCreateEvent;
       final state = e.data.voiceStates!.single;
       expect((state.muted, state.camera, state.version), (true, true, 2));
-      expect(state.watching, ['11020202-0202-7002-8002-020202020202']);
+      expect(state.watching,
+          ((json['voice_states'] as List).single as Map)['watching']);
       final nulls =
           dispatch('SPACE_CREATE', _load('space_create_event', 'nulls'))
               as SpaceCreateEvent;
@@ -1617,6 +1679,456 @@ void main() {
       final older = GatewaySpaceCreatePayload.fromJson(
           _without(json, 'member_client_status'));
       expect(older.memberClientStatus, isEmpty);
+    });
+  });
+
+  // What the API with end-to-end encryption sends, its events and its routes'
+  // answers: binary fields in standard base64.
+  // E2eApi's answers, from the API's own types. A field a model reads as
+  // nullable, or as empty when it's missing, is set in the full variant, so a
+  // name the model spells apart from the API's reads as nothing here.
+  group('end-to-end encryption\'s answers', () {
+    void wholeEntry(MlsEntry e) {
+      expect([
+        e.data,
+        e.messageId,
+        e.senderUser,
+        e.senderDevice,
+        e.statement,
+        e.replyTo
+      ], everyElement(isNotNull));
+      expect((e.deleted, e.mentions.length), (true, 1));
+    }
+
+    _parses('e2e_config', E2eConfig.fromJson, check: (c, variant) {
+      final json = _load('e2e_config', variant);
+      expect(c.externalSender, json['external_sender']);
+      expect(c.minClients, json['min_clients']);
+      if (variant == 'full') {
+        expect(c.cutoverAt, DateTime.utc(2026, 10, 22, 10, 0, 0, 123, 456));
+        expect(c.minClients, isNotEmpty);
+      }
+    });
+    _parses('device', Device.fromJson,
+        check: (d, variant) => expect(d.current, variant == 'full'));
+    _parses('identity', Identity.fromJson, check: (i, variant) {
+      if (variant == 'full') expect(i.certificates, hasLength(1));
+    });
+    _parses('identity_backup', IdentityBackup.fromJson, check: (b, variant) {
+      if (variant != 'full') return;
+      expect(b.wrappedPreviousBackupKeys, isNotNull);
+      final replaced = b.replaced.single;
+      expect(replaced.identityId, isNotEmpty);
+      expect(
+          replaced.replacedAt, DateTime.utc(2026, 10, 22, 10, 0, 0, 123, 456));
+    });
+    _parses('mls_queue_page', QueuePage.fromJson, check: (p, variant) {
+      if (variant == 'full') wholeEntry(p.entries.single);
+    });
+    _parses('member_added', MemberAdded.fromJson, check: (m, variant) {
+      if (variant != 'full') return;
+      expect([m.user, m.statusId, m.clientStatus, m.commit.welcomeSeq],
+          everyElement(isNotNull));
+    });
+    _parses('edited_message', MessageEdited.fromJson, check: (m, variant) {
+      if (variant == 'full') wholeEntry(m.entry);
+    });
+    _parses('deleted_message', MessageDeleted.fromJson, check: (m, variant) {
+      if (variant == 'full') wholeEntry(m.entry);
+    });
+    _parses('inbox_message_row', InboxMessage.fromJson);
+    _parses('backup_segment_row', BackupSegment.fromJson);
+    _parses('decrypt_failure_row', DecryptFailureCount.fromJson);
+  });
+
+  group('end-to-end encryption', () {
+    GatewayEventPayload? dispatch(String type, Map<String, dynamic> data) =>
+        GatewayEnvelope.fromJson({
+          'event': 'payload',
+          'op': 1,
+          'd': {'type': type, 'data': data},
+          's': 7,
+        }).d;
+
+    test('each event is its own, with its data', () {
+      final commit = dispatch('MLS_COMMIT', _load('mls_commit_event', 'full'))
+          as MlsCommitPayloadEvent;
+      final entry = commit.data.entry;
+      expect((
+        commit.data.conversationId,
+        commit.data.generation,
+        commit.data.epoch
+      ), (
+        '10020202-0202-7002-8002-020202020202',
+        2,
+        2
+      ));
+      expect((
+        entry.seq,
+        entry.kind,
+        entry.data,
+        entry.sentAt,
+        entry.generation,
+        entry.epoch,
+      ), (
+        2,
+        's-string',
+        'Ag==',
+        2,
+        2,
+        2
+      ));
+      const id = '11020202-0202-7002-8002-020202020202';
+      expect((
+        entry.messageId,
+        entry.senderUser,
+        entry.senderDevice,
+        entry.statement,
+        entry.deleted,
+        entry.replyTo,
+      ), (
+        id,
+        id,
+        id,
+        'Ag==',
+        true,
+        id
+      ));
+      expect(entry.mentions, [id]);
+
+      final proposal =
+          dispatch('MLS_PROPOSAL', _load('mls_commit_event', 'full'))
+              as MlsProposalPayloadEvent;
+      expect(proposal.data.entry.seq, 2);
+
+      final welcome =
+          dispatch('MLS_WELCOME', _load('mls_welcome_event', 'full'))
+              as MlsWelcomePayloadEvent;
+      expect(welcome.data.devices, [id]);
+      expect(welcome.data.entry.data, 'Ag==');
+
+      final message =
+          dispatch('DEVICE_MESSAGE', _load('device_message_event', 'full'))
+              as DeviceMessagePayloadEvent;
+      expect((
+        message.data.deviceId,
+        message.data.id
+      ), (
+        '10020202-0202-7002-8002-020202020202',
+        '10020202-0202-7002-8002-020202020202'
+      ));
+
+      final low =
+          dispatch('KEY_PACKAGES_LOW', _load('key_packages_low_event', 'full'))
+              as KeyPackagesLowPayloadEvent;
+      expect(low.data.remaining, 2);
+
+      final added = dispatch('DEVICE_ADD', _load('device_add_event', 'full'))
+          as DeviceAddedEvent;
+      final at = DateTime.utc(2026, 10, 22, 10, 0, 0, 123, 456);
+      expect((
+        added.data.name,
+        added.data.client,
+        added.data.listed,
+        added.data.createdAt,
+        added.data.lastSeenAt
+      ), (
+        's-string',
+        's-string',
+        true,
+        at,
+        at
+      ));
+
+      final removed =
+          dispatch('DEVICE_REMOVE', _load('device_remove_event', 'full'))
+              as DeviceRemovedEvent;
+      expect(removed.data.deviceId, '10020202-0202-7002-8002-020202020202');
+
+      final identity =
+          dispatch('IDENTITY_UPDATE', _load('identity_update_event', 'full'))
+              as IdentityUpdatedEvent;
+      expect((identity.data.identityKey, identity.data.deviceListVersion),
+          ('Ag==', 2));
+
+      final share = dispatch('HISTORY_SHARE_CREATE',
+              _load('history_share_create_event', 'full'))
+          as HistoryShareCreatedEvent;
+      expect((
+        share.data.kind,
+        share.data.range,
+        share.data.startsAt,
+        share.data.size,
+        share.data.parts
+      ), (
+        's-string',
+        's-string',
+        at,
+        2,
+        2
+      ));
+      // A catch-up has no range.
+      final catchUp = dispatch('HISTORY_SHARE_CREATE',
+              _load('history_share_create_event', 'nulls'))
+          as HistoryShareCreatedEvent;
+      expect(catchUp.data.range, isNull);
+    });
+
+    test('an entry past 16 KiB comes without its data, read from the queue',
+        () {
+      for (final variant in ['nulls', 'partial']) {
+        final commit =
+            dispatch('MLS_COMMIT', _load('mls_commit_event', variant))
+                as MlsCommitPayloadEvent;
+        final entry = commit.data.entry;
+        expect((
+          entry.data,
+          entry.deleted,
+          entry.messageId,
+          entry.statement
+        ), (
+          null,
+          false,
+          null,
+          null
+        ), reason: variant);
+        expect(entry.mentions, isEmpty, reason: variant);
+      }
+    });
+
+    test(
+        'DM_MESSAGE_UPDATE: an encrypted edit is its entry, a message the '
+        'message as before', () {
+      final edit =
+          dispatch('DM_MESSAGE_UPDATE', _load('dm_message_edit_event', 'full'))
+              as DMMessageEditedEvent;
+      expect((
+        edit.data.id,
+        edit.data.conversationId,
+        edit.data.editedAt,
+        edit.data.entry.data
+      ), (
+        '10020202-0202-7002-8002-020202020202',
+        '10020202-0202-7002-8002-020202020202',
+        DateTime.utc(2026, 10, 22, 10, 0, 0, 123, 456),
+        'Ag=='
+      ));
+      // An API from before end-to-end encryption sends the message, with no
+      // entry.
+      final before = dispatch('DM_MESSAGE_UPDATE', _messageBeforeEncryption)
+          as DMMessageUpdatedEvent;
+      expect(before.data.content, 'edited');
+    });
+
+    test(
+        'DM_MESSAGE_DELETE: an encrypted message\'s tombstone; a notice\'s '
+        'none', () {
+      final tombstone = dispatch('DM_MESSAGE_DELETE', {
+        'id': 'm1',
+        'conversation_id': 'c1',
+        'entry': {
+          'seq': 9,
+          'kind': 'delete',
+          'data': 'AQI=',
+          'sent_at': 1764000000000,
+          'generation': 0,
+          'epoch': 3,
+          'message_id': 'm1',
+          'sender_user': 'u1',
+          'sender_device': 'd1',
+        },
+      }) as DMMessageDeletedEvent;
+      expect((
+        tombstone.data.entry?.kind,
+        tombstone.data.entry?.seq,
+        tombstone.data.entry?.messageId
+      ), (
+        'delete',
+        9,
+        'm1'
+      ));
+      final notice = dispatch('DM_MESSAGE_DELETE',
+              _load('dm_message_delete_event', 'full')..remove('entry'))
+          as DMMessageDeletedEvent;
+      expect(notice.data.entry, isNull);
+    });
+
+    // A message of DM_MESSAGE_CREATE and of a conversation's history.
+    final encrypted = {
+      ..._load('dm_message_create', 'nulls'),
+      'author_id': 'u1',
+      'content': null,
+      'ciphertext': 'AAEC',
+      'seq': 12,
+      'sent_at': 1764000000123,
+      'generation': 1,
+      'epoch': 4,
+      'sender_device_id': 'd1',
+      'edited_at': '2026-11-25T10:00:00.5Z',
+      'mentions': ['u2', 'u3'],
+      'nonce': 'n1',
+    };
+
+    test('an encrypted message\'s fields; a notice has none', () {
+      final m = DirectMessage.fromJson(encrypted);
+      expect((
+        m.ciphertext,
+        m.seq,
+        m.sentAt,
+        m.generation,
+        m.epoch,
+        m.senderDeviceId,
+        m.editedAt,
+        m.nonce,
+      ), (
+        'AAEC',
+        12,
+        1764000000123,
+        1,
+        4,
+        'd1',
+        DateTime.utc(2026, 11, 25, 10, 0, 0, 500),
+        'n1'
+      ));
+      expect(m.mentions, ['u2', 'u3']);
+      // The API leaves them out of a notice, as an API from before them does.
+      final notice = DirectMessage.fromJson({
+        ..._load('dm_message_create', 'full'),
+        'type': 2,
+      }..removeWhere((key, _) => _encryptedFields.contains(key)));
+      expect((
+        notice.ciphertext,
+        notice.seq,
+        notice.sentAt,
+        notice.generation,
+        notice.epoch,
+        notice.senderDeviceId,
+        notice.editedAt,
+        notice.historyShare,
+      ), (
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ));
+      expect(notice.mentions, isEmpty);
+    });
+
+    test('a history share\'s notice: with whom, and how far back', () {
+      final notice = DirectMessage.fromJson({
+        ..._load('dm_message_create', 'nulls'),
+        'author_id': 'u1',
+        'type': 4,
+        'history_share': {'to_user_id': 'u2', 'range': 'week'},
+      });
+      expect(notice.type, MessageType.historyShare);
+      expect((notice.historyShare?.toUserId, notice.historyShare?.range),
+          ('u2', 'week'));
+    });
+
+    test('a conversation\'s group, and whether it\'s from before encryption',
+        () {
+      final json = {
+        ..._load('conversation', 'full'),
+        'legacy': true,
+        'mls': {
+          'generation': 1,
+          'epoch': 7,
+          'last_seq': 40,
+          'floor_seq': 2,
+          'joined_seq': 31,
+        },
+      };
+      final c = Conversation.fromJson(json);
+      expect(c.legacy, isTrue);
+      expect((
+        c.mls?.generation,
+        c.mls?.epoch,
+        c.mls?.lastSeq,
+        c.mls?.floorSeq,
+        c.mls?.joinedSeq
+      ), (
+        1,
+        7,
+        40,
+        2,
+        31
+      ));
+      // An event's: a new conversation, without a group; and a device that
+      // has no leaf in it.
+      final bare =
+          Conversation.fromJson({...json, 'legacy': false, 'mls': null});
+      expect((bare.legacy, bare.mls), (false, null));
+      final outside = Conversation.fromJson({
+        ...json,
+        'mls': {...json['mls'] as Map<String, dynamic>, 'joined_seq': null},
+      });
+      expect(outside.mls?.joinedSeq, isNull);
+      // An API from before end-to-end encryption says neither.
+      final older = Conversation.fromJson(_load('conversation', 'full')
+        ..remove('legacy')
+        ..remove('mls'));
+      expect((older.legacy, older.mls), (false, null));
+    });
+
+    test('an attachment\'s kind: an encrypted file, or a file as before', () {
+      final json = _load('attachment', 'full');
+      expect(Attachment.fromJson({...json, 'kind': 1}).kind,
+          AttachmentKind.encryptedFile);
+      expect(Attachment.fromJson(_without(json, 'kind')).kind,
+          AttachmentKind.file);
+    });
+
+    test('the events come on their own streams', () async {
+      final events = _Events();
+      final got = <String, Future<List<GatewayEventPayload>>>{
+        'MLS_COMMIT': events.onMlsCommit.toList(),
+        'MLS_PROPOSAL': events.onMlsProposal.toList(),
+        'MLS_WELCOME': events.onMlsWelcome.toList(),
+        'DEVICE_MESSAGE': events.onDeviceMessage.toList(),
+        'KEY_PACKAGES_LOW': events.onKeyPackagesLow.toList(),
+        'DEVICE_ADD': events.onDeviceAdd.toList(),
+        'DEVICE_REMOVE': events.onDeviceRemove.toList(),
+        'IDENTITY_UPDATE': events.onIdentityUpdate.toList(),
+        'HISTORY_SHARE_CREATE': events.onHistoryShareCreate.toList(),
+        'DM_MESSAGE_UPDATE': events.onDMEdit.toList(),
+      };
+      final sent = {
+        'MLS_COMMIT':
+            dispatch('MLS_COMMIT', _load('mls_commit_event', 'full'))!,
+        'MLS_PROPOSAL':
+            dispatch('MLS_PROPOSAL', _load('mls_commit_event', 'full'))!,
+        'MLS_WELCOME':
+            dispatch('MLS_WELCOME', _load('mls_welcome_event', 'full'))!,
+        'DEVICE_MESSAGE':
+            dispatch('DEVICE_MESSAGE', _load('device_message_event', 'full'))!,
+        'KEY_PACKAGES_LOW': dispatch(
+            'KEY_PACKAGES_LOW', _load('key_packages_low_event', 'full'))!,
+        'DEVICE_ADD':
+            dispatch('DEVICE_ADD', _load('device_add_event', 'full'))!,
+        'DEVICE_REMOVE':
+            dispatch('DEVICE_REMOVE', _load('device_remove_event', 'full'))!,
+        'IDENTITY_UPDATE': dispatch(
+            'IDENTITY_UPDATE', _load('identity_update_event', 'full'))!,
+        'HISTORY_SHARE_CREATE': dispatch('HISTORY_SHARE_CREATE',
+            _load('history_share_create_event', 'full'))!,
+        'DM_MESSAGE_UPDATE': dispatch(
+            'DM_MESSAGE_UPDATE', _load('dm_message_edit_event', 'full'))!,
+      };
+      // A message from before end-to-end encryption isn't an edit's entry.
+      final before = dispatch('DM_MESSAGE_UPDATE', _messageBeforeEncryption)!;
+      final updates = events.onDMUpdate.toList();
+      sent.values.forEach(events.add);
+      events.add(before);
+      await events.close();
+      for (final MapEntry(key: type, value: list) in got.entries) {
+        expect(await list, [sent[type]], reason: type);
+      }
+      expect(await updates, [before]);
     });
   });
 }

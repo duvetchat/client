@@ -143,7 +143,11 @@ class GatewayEnvelope {
       case 'DM_MESSAGE_CREATE':
         return DMMessageCreatedEvent(DirectMessage.fromJson(d));
       case 'DM_MESSAGE_UPDATE':
-        return DMMessageUpdatedEvent(DirectMessage.fromJson(d));
+        // An encrypted message's edit is its entry; an API before end-to-end
+        // encryption sends the message.
+        return d.containsKey('entry')
+            ? DMMessageEditedEvent(DMMessageUpdateEvent.fromJson(d))
+            : DMMessageUpdatedEvent(DirectMessage.fromJson(d));
       case 'DM_MESSAGE_DELETE':
         return DMMessageDeletedEvent(DMMessageDeleteEvent.fromJson(d));
       case 'DM_MESSAGE_PIN_UPDATE':
@@ -176,6 +180,26 @@ class GatewayEnvelope {
         return TeamInviteCreatedEvent(TeamInvite.fromJson(d));
       case 'STORAGE_TRANSFER_UPDATE':
         return StorageTransferUpdatedEvent(StorageTransfer.fromJson(d));
+      // End-to-end encryption's, which a gateway sends only to a client that
+      // has it.
+      case 'MLS_COMMIT':
+        return MlsCommitPayloadEvent(MlsCommitEvent.fromJson(d));
+      case 'MLS_WELCOME':
+        return MlsWelcomePayloadEvent(MlsWelcomeEvent.fromJson(d));
+      case 'MLS_PROPOSAL':
+        return MlsProposalPayloadEvent(MlsProposalEvent.fromJson(d));
+      case 'DEVICE_MESSAGE':
+        return DeviceMessagePayloadEvent(DeviceMessageEvent.fromJson(d));
+      case 'KEY_PACKAGES_LOW':
+        return KeyPackagesLowPayloadEvent(KeyPackagesLowEvent.fromJson(d));
+      case 'DEVICE_ADD':
+        return DeviceAddedEvent(UserDevice.fromJson(d));
+      case 'DEVICE_REMOVE':
+        return DeviceRemovedEvent(DeviceRemoveEvent.fromJson(d));
+      case 'IDENTITY_UPDATE':
+        return IdentityUpdatedEvent(IdentityUpdateEvent.fromJson(d));
+      case 'HISTORY_SHARE_CREATE':
+        return HistoryShareCreatedEvent(HistoryShare.fromJson(d));
       default:
         return UnknownEvent(type, d);
     }

@@ -16,10 +16,16 @@ class SignIn {
   /// The session (refresh) token, sent as `X-Session-Token`.
   final String? sessionToken;
 
-  SignIn(this.token, {this.sessionToken});
+  /// A login's challenge (standard base64): what the session's first bind
+  /// proof signs, to bind it to its device (`E2eApi.registerDevice`). Null
+  /// from a refresh, and from an API before end-to-end encryption.
+  final String? deviceChallenge;
+
+  SignIn(this.token, {this.sessionToken, this.deviceChallenge});
   SignIn.fromJson(Map<String, dynamic> j)
       : token = j['token'] as String,
-        sessionToken = j['session_token'] as String?;
+        sessionToken = j['session_token'] as String?,
+        deviceChallenge = j['device_challenge'] as String?;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,14 +56,19 @@ class RestClient with RestMethods {
   @override
   final Duration requestTimeout;
 
+  @override
+  final String? duvetClient;
+
   /// A client for the API; [token] and [sessionToken] resume a session
   /// [logIn] started before. A request fails with a [TimeoutException] once
-  /// [requestTimeout] passes without progress.
+  /// [requestTimeout] passes without progress. [duvetClient] is what the app
+  /// is (`android/1.1.0`), which every request, a renewal's too, says.
   RestClient(this.client,
       {ApiRouter? router,
       String token = '',
       String sessionToken = '',
-      this.requestTimeout = defaultRequestTimeout})
+      this.requestTimeout = defaultRequestTimeout,
+      this.duvetClient})
       : router = router ?? const ApiRouter(),
         _token = token,
         _sessionToken = sessionToken;
@@ -99,6 +110,7 @@ class RestClient with RestMethods {
         http.Request('POST', router.urlFromPath('/api/auth/refresh'))
           ..headers.addAll({
             if (sessionToken.isNotEmpty) 'X-Session-Token': sessionToken,
+            if (duvetClient case final name?) 'X-Duvet-Client': name,
           }),
         timeout: requestTimeout);
 
@@ -123,14 +135,16 @@ class RestClient with RestMethods {
       throw DuvetAuthException(
           action: 'refresh session',
           statusCode: response.statusCode,
-          body: response.body);
+          body: response.body,
+          retryAfter: retryAfterOf(response.headers));
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw DuvetApiException(
           action: 'refresh session',
           statusCode: response.statusCode,
           reasonPhrase: response.reasonPhrase,
-          body: response.body);
+          body: response.body,
+          retryAfter: retryAfterOf(response.headers));
     }
     return _keep(response);
   }

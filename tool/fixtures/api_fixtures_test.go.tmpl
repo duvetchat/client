@@ -75,7 +75,6 @@ func TestWriteFixtures(t *testing.T) {
 	w("message_update", of[ev.MessageUpdate])
 	w("message_delete", of[ev.MessageDelete])
 	w("dm_message_create", of[ev.DMMessageCreate])
-	w("dm_message_update", of[ev.DMMessageUpdate])
 	w("dm_message_delete_event", of[ev.DMMessageDelete])
 	w("friend_request_create_event", of[ev.FriendRequestCreate])
 	w("friend_request_accept_event", of[ev.FriendRequestAccept])
@@ -114,4 +113,54 @@ func TestWriteFixtures(t *testing.T) {
 	// A notification level, as its list and its PUT answer it, and the event of a change.
 	w("notification_setting", of[q.NotificationSetting])
 	w("notification_settings_update_event", of[ev.NotificationSettingsUpdate])
+
+	// End-to-end encryption's events (HISTORY_SHARE_CREATE from its shared history's). MLS_PROPOSAL carries an
+	// MLS_COMMIT's data (MlsProposal is MlsCommit), and DEVICE_ADD a device as the list of them has it but for current.
+	w("mls_commit_event", of[ev.MlsCommit])
+	w("mls_welcome_event", of[ev.MlsWelcome])
+	w("device_message_event", of[ev.DeviceMessage])
+	w("key_packages_low_event", of[ev.KeyPackagesLow])
+	w("device_add_event", of[ev.DeviceAdd])
+	w("device_remove_event", of[ev.DeviceRemove])
+	w("identity_update_event", of[ev.IdentityUpdate])
+	w("history_share_create_event", of[ev.HistoryShareCreate])
+	// DM_MESSAGE_UPDATE: an encrypted message's edit, its entry.
+	w("dm_message_edit_event", of[ev.DMMessageUpdate])
+
+	// End-to-end encryption's REST answers (E2eApi's), the lists' as one of their rows
+	w("e2e_config", of[ser.E2EConfig])
+	w("device", of[ser.Device])
+	w("identity", of[ser.Identity])
+	w("identity_backup", of[ser.IdentityBackup])
+	w("mls_queue_page", of[ser.MlsQueuePage])
+	w("member_added", of[ser.MemberAdded])
+	w("edited_message", of[ser.EditedMessage])
+	w("deleted_message", of[ser.DeletedMessage])
+	w("inbox_message_row", of[q.ListInboxMessagesRow])
+	w("backup_segment_row", of[q.GetBackupSegmentsRow])
+	w("decrypt_failure_row", of[q.GetDecryptFailuresRow])
+
+	// The refusals' bodies the client tells apart: the 426, and the 409s with the API's own errors, which it reads them
+	// by. A stale message's 409 has an epoch taken's shape.
+	w("update_duvet", of[ser.UpdateDuvet])
+	w("stale_message", func(mode variant) any {
+		body := of[ser.MlsEpochTaken](mode).(ser.MlsEpochTaken)
+		body.Error = svc.StaleMessageError{}.Error()
+		return body
+	})
+	w("epoch_taken", func(mode variant) any {
+		body := of[ser.MlsEpochTaken](mode).(ser.MlsEpochTaken)
+		body.Error = svc.EpochTakenError{}.Error()
+		return body
+	})
+	w("identity_changed", func(mode variant) any {
+		body := of[ser.IdentityChanged](mode).(ser.IdentityChanged)
+		body.Error = svc.IdentityChangedError{}.Error()
+		return body
+	})
+	w("device_list_changed", func(mode variant) any {
+		body := of[ser.DeviceListChanged](mode).(ser.DeviceListChanged)
+		body.Error = svc.DeviceListChangedError{}.Error()
+		return body
+	})
 }

@@ -1,4 +1,4 @@
-## Unreleased
+## 3.0.0 – 2026-11-27
 
 What the mobile app needs of the API with end-to-end encryption: its routes,
 objects and events, the client's name, raw uploads, downloads from signed URLs
